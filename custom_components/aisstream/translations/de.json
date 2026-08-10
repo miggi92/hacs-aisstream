@@ -1,0 +1,56 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Mit aisstream.io verbinden",
+        "description": "API-Key von aisstream.io eingeben. Entweder die Bounding Box eingrenzen, eine Liste von MMSI-Nummern angeben, oder beides - eine unbegrenzte Abo ohne Filter ist nicht erlaubt.",
+        "data": {
+          "api_key": "API-Key",
+          "box_south": "Bounding Box: Südliche Breite",
+          "box_west": "Bounding Box: Westliche Länge",
+          "box_north": "Bounding Box: Nördliche Breite",
+          "box_east": "Bounding Box: Östliche Länge",
+          "mmsi_filter": "Zu verfolgende MMSI-Nummern (kommagetrennt, optional)"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "aisstream.io hat den API-Key abgelehnt",
+      "cannot_connect": "Verbindung zu aisstream.io fehlgeschlagen",
+      "no_filter": "Bounding Box eingrenzen oder mindestens eine MMSI-Nummer angeben, sonst würden alle Schiffe weltweit getrackt"
+    },
+    "abort": {
+      "already_configured": "Dieser API-Key ist bereits konfiguriert"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "description": "Bounding Box oder verfolgte MMSI-Nummern anpassen.",
+        "data": {
+          "api_key": "API-Key",
+          "box_south": "Bounding Box: Südliche Breite",
+          "box_west": "Bounding Box: Westliche Länge",
+          "box_north": "Bounding Box: Nördliche Breite",
+          "box_east": "Bounding Box: Östliche Länge",
+          "mmsi_filter": "Zu verfolgende MMSI-Nummern (kommagetrennt, optional)"
+        }
+      }
+    },
+    "error": {
+      "no_filter": "Bounding Box eingrenzen oder mindestens eine MMSI-Nummer angeben, sonst würden alle Schiffe weltweit getrackt"
+    }
+  },
+  "entity": {
+    "device_tracker": {
+      "position": { "name": "Position" }
+    },
+    "sensor": {
+      "speed_over_ground": { "name": "Geschwindigkeit" },
+      "course_over_ground": { "name": "Kurs" },
+      "true_heading": { "name": "Steuerkurs" },
+      "navigational_status": { "name": "Navigationsstatus" },
+      "destination": { "name": "Ziel" }
+    }
+  }
+}

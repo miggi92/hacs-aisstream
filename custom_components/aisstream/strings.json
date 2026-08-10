@@ -1,0 +1,56 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to aisstream.io",
+        "description": "Enter your aisstream.io API key. Restrict the bounding box, provide a list of MMSI numbers, or both - subscribing to the whole world without any filter is not allowed.",
+        "data": {
+          "api_key": "API key",
+          "box_south": "Bounding box: South latitude",
+          "box_west": "Bounding box: West longitude",
+          "box_north": "Bounding box: North latitude",
+          "box_east": "Bounding box: East longitude",
+          "mmsi_filter": "MMSI numbers to track (comma-separated, optional)"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "aisstream.io rejected the API key",
+      "cannot_connect": "Failed to connect to aisstream.io",
+      "no_filter": "Restrict the bounding box or specify at least one MMSI number, otherwise every vessel on earth would be tracked"
+    },
+    "abort": {
+      "already_configured": "This API key is already configured"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "description": "Update the bounding box or the tracked MMSI numbers.",
+        "data": {
+          "api_key": "API key",
+          "box_south": "Bounding box: South latitude",
+          "box_west": "Bounding box: West longitude",
+          "box_north": "Bounding box: North latitude",
+          "box_east": "Bounding box: East longitude",
+          "mmsi_filter": "MMSI numbers to track (comma-separated, optional)"
+        }
+      }
+    },
+    "error": {
+      "no_filter": "Restrict the bounding box or specify at least one MMSI number, otherwise every vessel on earth would be tracked"
+    }
+  },
+  "entity": {
+    "device_tracker": {
+      "position": { "name": "Position" }
+    },
+    "sensor": {
+      "speed_over_ground": { "name": "Speed" },
+      "course_over_ground": { "name": "Course" },
+      "true_heading": { "name": "Heading" },
+      "navigational_status": { "name": "Navigational status" },
+      "destination": { "name": "Destination" }
+    }
+  }
+}

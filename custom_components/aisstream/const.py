@@ -10,6 +10,8 @@ CONF_BOX_WEST = "box_west"
 CONF_BOX_NORTH = "box_north"
 CONF_BOX_EAST = "box_east"
 CONF_MMSI_FILTER = "mmsi_filter"
+CONF_ZONE = "zone_entity_id"
+CONF_LOCATION = "location"
 
 DEFAULT_BOX_SOUTH = -90.0
 DEFAULT_BOX_WEST = -180.0
@@ -21,6 +23,11 @@ RECONNECT_DELAY_MAX = 300
 
 SIGNAL_NEW_SHIP = f"{DOMAIN}_new_ship"
 SIGNAL_SHIP_UPDATE = f"{DOMAIN}_ship_update"
+
+# How long a vessel is still considered "present" after its last position
+# report, and how often the area count sensor re-evaluates presence.
+PRESENCE_TIMEOUT_MINUTES = 20
+PRESENCE_RECHECK_MINUTES = 2
 
 # AIS navigational status codes (ITU-R M.1371)
 NAVIGATIONAL_STATUS = {

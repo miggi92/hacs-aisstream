@@ -145,7 +145,13 @@ async def _validate_api_key(
     api_key: str, bounding_boxes: list, mmsi_filter: list[str]
 ) -> None:
     """Open a short-lived websocket connection to verify the API key works."""
-    message: dict = {"Apikey": api_key, "BoundingBoxes": bounding_boxes}
+    # Send both casings - aisstream's own sources disagree on "APIKey" vs
+    # "Apikey" and this environment can't reach aisstream.io to verify.
+    message: dict = {
+        "APIKey": api_key,
+        "Apikey": api_key,
+        "BoundingBoxes": bounding_boxes,
+    }
     if mmsi_filter:
         message["FiltersShipMMSI"] = mmsi_filter
 

@@ -88,7 +88,14 @@ class AISStreamClient:
         # confirmed single-value example (["PositionReport"]) for that field,
         # and unfiltered subscriptions are the reliably documented case.
         # Unwanted message types are discarded client-side in _handle_message.
+        #
+        # Sending both "APIKey" (the casing used by aisstream's own generated
+        # client libraries) and "Apikey" (the casing shown on their live docs
+        # page) since the two sources disagree and this environment can't
+        # reach aisstream.io to verify which the server actually expects.
+        # Harmless either way: JSON APIs ignore fields they don't recognize.
         message: dict = {
+            "APIKey": self._api_key,
             "Apikey": self._api_key,
             "BoundingBoxes": self.bounding_boxes,
         }

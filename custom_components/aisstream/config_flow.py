@@ -145,7 +145,7 @@ async def _validate_api_key(
     api_key: str, bounding_boxes: list, mmsi_filter: list[str]
 ) -> None:
     """Open a short-lived websocket connection to verify the API key works."""
-    message: dict = {"APIKey": api_key, "BoundingBoxes": bounding_boxes}
+    message: dict = {"Apikey": api_key, "BoundingBoxes": bounding_boxes}
     if mmsi_filter:
         message["FiltersShipMMSI"] = mmsi_filter
 

@@ -89,7 +89,7 @@ class AISStreamClient:
         # and unfiltered subscriptions are the reliably documented case.
         # Unwanted message types are discarded client-side in _handle_message.
         message: dict = {
-            "APIKey": self._api_key,
+            "Apikey": self._api_key,
             "BoundingBoxes": self.bounding_boxes,
         }
         if self._mmsi_filter:

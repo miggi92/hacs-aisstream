@@ -84,10 +84,13 @@ class AISStreamClient:
                 await self._task
 
     def _subscribe_message(self) -> dict:
+        # Deliberately not sending FilterMessageTypes: aisstream.io only has a
+        # confirmed single-value example (["PositionReport"]) for that field,
+        # and unfiltered subscriptions are the reliably documented case.
+        # Unwanted message types are discarded client-side in _handle_message.
         message: dict = {
             "APIKey": self._api_key,
             "BoundingBoxes": self.bounding_boxes,
-            "FilterMessageTypes": ["PositionReport", "ShipStaticData"],
         }
         if self._mmsi_filter:
             message["FiltersShipMMSI"] = self._mmsi_filter

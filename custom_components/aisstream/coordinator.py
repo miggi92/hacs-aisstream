@@ -58,9 +58,11 @@ class AISStreamClient:
         self.entry_id = entry_id
         self.ships: dict[str, ShipData] = {}
         self.available = False
+        self.bounding_boxes = bounding_boxes
+        self.messages_received = 0
+        self.last_message_at: datetime | None = None
 
         self._api_key = api_key
-        self._bounding_boxes = bounding_boxes
         self._mmsi_filter = mmsi_filter or None
         self._session: aiohttp.ClientSession | None = None
         self._ws: aiohttp.ClientWebSocketResponse | None = None
@@ -84,7 +86,7 @@ class AISStreamClient:
     def _subscribe_message(self) -> dict:
         message: dict = {
             "APIKey": self._api_key,
-            "BoundingBoxes": self._bounding_boxes,
+            "BoundingBoxes": self.bounding_boxes,
             "FilterMessageTypes": ["PositionReport", "ShipStaticData"],
         }
         if self._mmsi_filter:
@@ -118,12 +120,18 @@ class AISStreamClient:
             self._ws = ws
             await ws.send_json(self._subscribe_message())
             self.available = True
-            _LOGGER.debug("Connected to aisstream.io")
+            _LOGGER.info(
+                "Subscribed to aisstream.io with bounding boxes %s%s",
+                self.bounding_boxes,
+                f" and MMSI filter {self._mmsi_filter}" if self._mmsi_filter else "",
+            )
 
             async for msg in ws:
                 if self._stopping:
                     break
                 if msg.type == aiohttp.WSMsgType.TEXT:
+                    self.messages_received += 1
+                    self.last_message_at = dt_util.utcnow()
                     self._handle_message(msg.json())
                 elif msg.type in (
                     aiohttp.WSMsgType.ERROR,

@@ -185,6 +185,12 @@ class AISStreamAreaCountSensor(SensorEntity):
             "vessels": sorted(
                 ship.name or f"MMSI {ship.mmsi}" for ship in self._present_ships()
             ),
+            "connected": self._client.available,
+            "bounding_boxes": self._client.bounding_boxes,
+            "messages_received": self._client.messages_received,
+            "last_message_at": self._client.last_message_at.isoformat()
+            if self._client.last_message_at
+            else None,
         }
 
     async def async_added_to_hass(self) -> None:

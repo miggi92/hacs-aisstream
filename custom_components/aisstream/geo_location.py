@@ -24,6 +24,7 @@ from .const import (
     DOMAIN,
     PRESENCE_TIMEOUT_MINUTES,
     SIGNAL_NEW_SHIP,
+    SIGNAL_SHIP_REMOVED,
     SIGNAL_SHIP_UPDATE,
     ship_category,
 )
@@ -70,6 +71,8 @@ async def async_setup_entry(
 
     @callback
     def _sync(*_args) -> None:
+        for mmsi in [mmsi for mmsi in events if mmsi not in client.ships]:
+            events[mmsi].async_remove_event()
         new_events = []
         taken = {event.entity_id for event in events.values()}
         for mmsi, ship in list(client.ships.items()):
@@ -90,6 +93,11 @@ async def async_setup_entry(
 
     entry.async_on_unload(
         async_dispatcher_connect(hass, f"{SIGNAL_NEW_SHIP}_{entry.entry_id}", _sync)
+    )
+    entry.async_on_unload(
+        async_dispatcher_connect(
+            hass, f"{SIGNAL_SHIP_REMOVED}_{entry.entry_id}", _sync
+        )
     )
     entry.async_on_unload(async_track_time_interval(hass, _sync, SWEEP_INTERVAL))
     _sync()

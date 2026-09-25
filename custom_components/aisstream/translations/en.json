@@ -60,6 +60,9 @@
     }
   },
   "entity": {
+    "button": {
+      "remove_stale_vessels": { "name": "Remove stale vessels" }
+    },
     "device_tracker": {
       "position": { "name": "Position" }
     },

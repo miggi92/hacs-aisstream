@@ -1,6 +1,7 @@
 """Base entity for tracked aisstream.io vessels."""
 from __future__ import annotations
 
+from homeassistant.config_entries import ConfigSubentry
 from homeassistant.core import callback
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
@@ -18,6 +19,16 @@ def vessel_entity_id(domain: str, ship: ShipData, key: str) -> str:
     excluded from the logbook/recorder with a single ``*.aisstream_*`` glob.
     """
     return f"{domain}.aisstream_{slugify(ship.name or ship.mmsi)}_{key}"
+
+
+def area_device_info(subentry_id: str, subentry: ConfigSubentry) -> DeviceInfo:
+    """Return the device info of a monitored area."""
+    return DeviceInfo(
+        identifiers={(DOMAIN, subentry_id)},
+        name=subentry.title,
+        manufacturer="aisstream.io",
+        model="AIS area monitor",
+    )
 
 
 class AISStreamShipEntity(Entity):

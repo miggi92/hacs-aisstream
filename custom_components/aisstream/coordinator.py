@@ -21,6 +21,7 @@ from .const import (
     RECONNECT_DELAY_MAX,
     RECONNECT_DELAY_MIN,
     SIGNAL_NEW_SHIP,
+    SIGNAL_SHIP_REMOVED,
     SIGNAL_SHIP_UPDATE,
     SOG_NOT_AVAILABLE,
     STABLE_CONNECTION_SECONDS,
@@ -120,6 +121,8 @@ class AISStreamClient:
         mmsi_filter = sorted({mmsi for area in areas.values() for mmsi in area.mmsi})
         self.messages_received = 0
         self.last_message_at: datetime | None = None
+        # Vessels restored from the registry haven't reported since this.
+        self.started_at = dt_util.utcnow()
 
         self._api_key = api_key
         self._mmsi_filter = mmsi_filter or None
@@ -141,6 +144,13 @@ class AISStreamClient:
             self._task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await self._task
+
+    def forget_ship(self, mmsi: str) -> None:
+        """Drop a vessel so it is set up from scratch when seen again."""
+        if self.ships.pop(mmsi, None) is not None:
+            async_dispatcher_send(
+                self.hass, f"{SIGNAL_SHIP_REMOVED}_{self.entry_id}", mmsi
+            )
 
     def _subscribe_message(self) -> dict:
         # Deliberately not sending FilterMessageTypes: aisstream.io only has a

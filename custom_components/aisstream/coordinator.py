@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 from dataclasses import dataclass
 from datetime import datetime
 import logging
@@ -19,6 +20,7 @@ from .const import (
     RECONNECT_DELAY_MIN,
     SIGNAL_NEW_SHIP,
     SIGNAL_SHIP_UPDATE,
+    STABLE_CONNECTION_SECONDS,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -88,15 +90,8 @@ class AISStreamClient:
         # confirmed single-value example (["PositionReport"]) for that field,
         # and unfiltered subscriptions are the reliably documented case.
         # Unwanted message types are discarded client-side in _handle_message.
-        #
-        # Sending both "APIKey" (the casing used by aisstream's own generated
-        # client libraries) and "Apikey" (the casing shown on their live docs
-        # page) since the two sources disagree and this environment can't
-        # reach aisstream.io to verify which the server actually expects.
-        # Harmless either way: JSON APIs ignore fields they don't recognize.
         message: dict = {
             "APIKey": self._api_key,
-            "Apikey": self._api_key,
             "BoundingBoxes": self.bounding_boxes,
         }
         if self._mmsi_filter:
@@ -108,11 +103,21 @@ class AISStreamClient:
         delay = RECONNECT_DELAY_MIN
         try:
             while not self._stopping:
+                connected_at = dt_util.utcnow()
                 try:
                     await self._connect_and_listen()
-                    delay = RECONNECT_DELAY_MIN
                 except asyncio.CancelledError:
                     raise
+                except aiohttp.WSServerHandshakeError as err:
+                    if err.status == 429:
+                        _LOGGER.warning(
+                            "aisstream.io rejected the connection with HTTP 429"
+                            " (too many connections or rate-limited); make sure"
+                            " no other client uses this account's connection"
+                            " slots"
+                        )
+                    else:
+                        _LOGGER.warning("aisstream.io connection error: %s", err)
                 except Exception as err:  # noqa: BLE001
                     _LOGGER.warning("aisstream.io connection error: %s", err)
                 finally:
@@ -120,13 +125,24 @@ class AISStreamClient:
 
                 if self._stopping:
                     break
+                # Only reset the backoff after a connection that actually held
+                # up - aisstream.io rate-limits (HTTP 429) accounts and IPs
+                # that reconnect in a tight loop after immediate closes.
+                if (
+                    dt_util.utcnow() - connected_at
+                ).total_seconds() >= STABLE_CONNECTION_SECONDS:
+                    delay = RECONNECT_DELAY_MIN
                 await asyncio.sleep(delay)
                 delay = min(delay * 2, RECONNECT_DELAY_MAX)
         finally:
             await self._session.close()
 
     async def _connect_and_listen(self) -> None:
-        async with self._session.ws_connect(AISSTREAM_WS_URL, heartbeat=30) as ws:
+        # aisstream.io requires permessage-deflate (compress=15) to serve the
+        # full message bandwidth; without it little or no data arrives.
+        async with self._session.ws_connect(
+            AISSTREAM_WS_URL, heartbeat=30, compress=15
+        ) as ws:
             self._ws = ws
             await ws.send_json(self._subscribe_message())
             self.available = True
@@ -139,10 +155,11 @@ class AISStreamClient:
             async for msg in ws:
                 if self._stopping:
                     break
-                if msg.type == aiohttp.WSMsgType.TEXT:
+                if msg.type in (aiohttp.WSMsgType.TEXT, aiohttp.WSMsgType.BINARY):
+                    # aisstream.io delivers its JSON payloads as binary frames.
                     self.messages_received += 1
                     self.last_message_at = dt_util.utcnow()
-                    self._handle_message(msg.json())
+                    self._handle_message(json.loads(msg.data))
                 elif msg.type in (
                     aiohttp.WSMsgType.ERROR,
                     aiohttp.WSMsgType.CLOSE,
@@ -156,12 +173,16 @@ class AISStreamClient:
             _LOGGER.error("aisstream.io reported an error: %s", error)
             return
 
+        message_type = data.get("MessageType")
+        if message_type == "SubscriptionConfirmation":
+            _LOGGER.debug("aisstream.io confirmed subscription: %s", data)
+            return
+
         metadata = data.get("MetaData") or {}
         mmsi = str(metadata.get("MMSI") or "")
         if not mmsi:
             return
 
-        message_type = data.get("MessageType")
         message = data.get("Message") or {}
         is_new = mmsi not in self.ships
         ship = self.ships.setdefault(mmsi, ShipData(mmsi=mmsi))

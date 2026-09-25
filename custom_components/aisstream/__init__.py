@@ -54,12 +54,14 @@ def _remove_orphaned_devices(hass: HomeAssistant, entry: ConfigEntry) -> None:
     for device in dr.async_entries_for_config_entry(
         device_registry, entry.entry_id
     ):
-        subentry_ids = device.config_entries_subentries.get(entry.entry_id, set())
+        if hasattr(device, "config_subentry_id"):
+            # HA 2026.8+: a device belongs to exactly one entry and subentry.
+            subentry_ids = {device.config_subentry_id}
+        else:
+            subentry_ids = device.config_entries_subentries.get(entry.entry_id, set())
         if any(subentry_id in entry.subentries for subentry_id in subentry_ids):
             continue
-        device_registry.async_update_device(
-            device.id, remove_config_entry_id=entry.entry_id
-        )
+        device_registry.async_remove_device(device.id)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

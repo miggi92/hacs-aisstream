@@ -104,7 +104,7 @@ class AISStreamGeolocationEvent(GeolocationEvent):
         self._client = client
         self._entry = entry
         self._mmsi = mmsi
-        self._on_remove = on_remove
+        self._removed_callback = on_remove
         self._removing = False
 
     @property
@@ -165,7 +165,7 @@ class AISStreamGeolocationEvent(GeolocationEvent):
         )
 
     async def async_will_remove_from_hass(self) -> None:
-        self._on_remove(self)
+        self._removed_callback(self)
 
     @callback
     def _handle_update(self) -> None:

@@ -31,6 +31,7 @@ class AISStreamShipEntity(Entity):
             manufacturer="aisstream.io",
             model="AIS vessel",
             configuration_url="https://aisstream.io/documentation",
+            via_device=(DOMAIN, self.ship.area_id),
         )
 
     @property

@@ -113,12 +113,16 @@ async def async_setup_entry(
 
     @callback
     def _add_ship(mmsi: str) -> None:
-        if mmsi in known_mmsi:
+        area_id = client.ships[mmsi].area_id
+        if mmsi in known_mmsi or area_id is None:
             return
         known_mmsi.add(mmsi)
         async_add_entities(
-            AISStreamSensor(client, mmsi, description)
-            for description in SENSOR_DESCRIPTIONS
+            (
+                AISStreamSensor(client, mmsi, description)
+                for description in SENSOR_DESCRIPTIONS
+            ),
+            config_subentry_id=area_id,
         )
 
     entry.async_on_unload(

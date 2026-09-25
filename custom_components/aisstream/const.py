@@ -22,6 +22,8 @@ DEFAULT_BOX_EAST = 180.0
 
 RECONNECT_DELAY_MIN = 5
 RECONNECT_DELAY_MAX = 300
+# A connection must stay up this long before the reconnect backoff resets.
+STABLE_CONNECTION_SECONDS = 60
 
 SIGNAL_NEW_SHIP = f"{DOMAIN}_new_ship"
 SIGNAL_SHIP_UPDATE = f"{DOMAIN}_ship_update"

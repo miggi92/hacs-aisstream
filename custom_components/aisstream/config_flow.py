@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from typing import Any
 
@@ -145,11 +146,8 @@ async def _validate_api_key(
     api_key: str, bounding_boxes: list, mmsi_filter: list[str]
 ) -> None:
     """Open a short-lived websocket connection to verify the API key works."""
-    # Send both casings - aisstream's own sources disagree on "APIKey" vs
-    # "Apikey" and this environment can't reach aisstream.io to verify.
     message: dict = {
         "APIKey": api_key,
-        "Apikey": api_key,
         "BoundingBoxes": bounding_boxes,
     }
     if mmsi_filter:
@@ -157,14 +155,17 @@ async def _validate_api_key(
 
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.ws_connect(AISSTREAM_WS_URL) as ws:
+            async with session.ws_connect(AISSTREAM_WS_URL, compress=15) as ws:
                 await ws.send_json(message)
                 try:
                     async with asyncio.timeout(VALIDATE_TIMEOUT):
                         async for msg in ws:
-                            if msg.type != aiohttp.WSMsgType.TEXT:
+                            if msg.type not in (
+                                aiohttp.WSMsgType.TEXT,
+                                aiohttp.WSMsgType.BINARY,
+                            ):
                                 continue
-                            payload = msg.json()
+                            payload = json.loads(msg.data)
                             if error := payload.get("error"):
                                 raise InvalidAuth(error)
                             return

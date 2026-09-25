@@ -198,7 +198,11 @@ async def test_static_data_marker_and_entity_ids(hass: HomeAssistant) -> None:
     assert "rotate%2890" in picture and "4caf50" in picture
 
     dev_reg = dr.async_get(hass)
-    device = dev_reg.async_get_device(identifiers={(DOMAIN, MMSI_IN)})
+    device = next(
+        d
+        for d in dr.async_entries_for_config_entry(dev_reg, entry.entry_id)
+        if (DOMAIN, MMSI_IN) in d.identifiers
+    )
     assert device.model == "AIS vessel (cargo)"
 
 

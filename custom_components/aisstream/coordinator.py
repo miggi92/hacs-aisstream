@@ -22,6 +22,7 @@ from .const import (
     SIGNAL_SHIP_UPDATE,
     STABLE_CONNECTION_SECONDS,
 )
+from .geo import point_in_box
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -43,6 +44,16 @@ class ShipData:
     destination: str | None = None
     last_position_update: datetime | None = None
     last_static_update: datetime | None = None
+    # Area subentry this vessel is assigned to (the first one it was seen in).
+    area_id: str | None = None
+
+
+@dataclass
+class AreaFilter:
+    """Resolved filter of one monitored area subentry."""
+
+    bounding_boxes: list[list[list[float]]]
+    mmsi: frozenset[str]
 
 
 class AISStreamClient:
@@ -53,14 +64,17 @@ class AISStreamClient:
         hass: HomeAssistant,
         entry_id: str,
         api_key: str,
-        bounding_boxes: list[list[list[float]]],
-        mmsi_filter: list[str] | None,
+        areas: dict[str, AreaFilter],
     ) -> None:
         self.hass = hass
         self.entry_id = entry_id
         self.ships: dict[str, ShipData] = {}
         self.available = False
-        self.bounding_boxes = bounding_boxes
+        self.areas = areas
+        self.bounding_boxes = [
+            box for area in areas.values() for box in area.bounding_boxes
+        ]
+        mmsi_filter = sorted({mmsi for area in areas.values() for mmsi in area.mmsi})
         self.messages_received = 0
         self.last_message_at: datetime | None = None
 
@@ -184,7 +198,6 @@ class AISStreamClient:
             return
 
         message = data.get("Message") or {}
-        is_new = mmsi not in self.ships
         ship = self.ships.setdefault(mmsi, ShipData(mmsi=mmsi))
 
         if ship_name := metadata.get("ShipName"):
@@ -210,9 +223,32 @@ class AISStreamClient:
         else:
             return
 
-        if is_new:
-            async_dispatcher_send(
-                self.hass, f"{SIGNAL_NEW_SHIP}_{self.entry_id}", mmsi
-            )
-        else:
-            async_dispatcher_send(self.hass, f"{SIGNAL_SHIP_UPDATE}_{mmsi}")
+        if ship.area_id is None:
+            # Entities are only created once the vessel can be tied to an
+            # area, so they get removed together with that area.
+            ship.area_id = self._assign_area(ship)
+            if ship.area_id is not None:
+                async_dispatcher_send(
+                    self.hass, f"{SIGNAL_NEW_SHIP}_{self.entry_id}", mmsi
+                )
+            return
+
+        async_dispatcher_send(self.hass, f"{SIGNAL_SHIP_UPDATE}_{mmsi}")
+
+    def _assign_area(self, ship: ShipData) -> str | None:
+        """Return the area a vessel belongs to: MMSI lists first, then boxes."""
+        for area_id, area in self.areas.items():
+            if ship.mmsi in area.mmsi:
+                return area_id
+
+        if ship.latitude is None or ship.longitude is None:
+            return None
+        for area_id, area in self.areas.items():
+            if area.mmsi:
+                continue
+            if any(
+                point_in_box(ship.latitude, ship.longitude, [box])
+                for box in area.bounding_boxes
+            ):
+                return area_id
+        return None

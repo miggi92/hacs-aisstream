@@ -11,7 +11,7 @@ Home Assistant custom integration for [aisstream.io](https://aisstream.io) - liv
   - reuse an existing Home Assistant **zone**,
   - or enter a manual bounding box (south/west/north/east).
   - Optionally add a comma-separated list of **MMSI numbers** to track specific vessels within (or regardless of) that area.
-- One Home Assistant **device per vessel**, created automatically the moment it's first seen, with:
+- One Home Assistant **device per vessel**, created automatically the moment it's first seen inside one of your areas and **assigned to that area** (shown as connected via the area's device; a vessel keeps the area it was first seen in), with:
   - a `device_tracker` entity showing the vessel's live position on the map,
   - `sensor` entities for speed over ground, course over ground, true heading, navigational status and destination.
 - A **"Vessels in area" sensor** per area, showing how many vessels have reported a position inside that specific area within the last 20 minutes - handy for harbor-traffic dashboards and automations. Its attributes also expose live connection diagnostics (`connected`, `messages_received`, `last_message_at`, the resolved `bounding_box`) to help tell a real connection problem apart from a quiet/uncovered area.
@@ -43,7 +43,7 @@ Requires Home Assistant 2025.4 or newer (uses the config subentries feature to m
    If a picked location or a zone is set, it takes precedence over the manual bounding box. At least one area or an MMSI list must be set - subscribing to the entire planet without any filter would create a device for every AIS-transmitting vessel on earth (several thousand), which is rejected on purpose.
 4. Repeat *Add area* for every additional harbor/region you want to monitor - no need to re-enter the API key.
 
-Each area can be edited or removed later from the integration's entry page. To change the API key itself, remove and re-add the integration.
+Each area can be edited or removed later from the integration's entry page. Removing an area also removes the vessel devices assigned to it. Individual vessel devices can be deleted from their device page; they are re-created if the vessel is seen again after the next restart or reload. To change the API key itself, remove and re-add the integration.
 
 ### A note on combining areas and MMSI filters
 

@@ -62,5 +62,6 @@ geo_location_sources:
 
 ## Notes
 
+- Brand images (icon and logo, including dark variants) ship in `custom_components/aisstream/brand/` and are picked up automatically by Home Assistant 2026.3 or newer.
 - Data is push-based (`iot_class: cloud_push`); entities update as soon as a new AIS message for that vessel arrives, there is no polling interval to configure.
 - `TrueHeading` value `511` ("not available" per the AIS spec) is reported as unknown.

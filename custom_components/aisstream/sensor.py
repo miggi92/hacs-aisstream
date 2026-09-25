@@ -13,7 +13,7 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry, ConfigSubentry
-from homeassistant.const import DEGREE, UnitOfSpeed
+from homeassistant.const import DEGREE, UnitOfLength, UnitOfSpeed
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import DeviceInfo
@@ -26,8 +26,10 @@ from .const import (
     NAVIGATIONAL_STATUS,
     PRESENCE_RECHECK_MINUTES,
     PRESENCE_TIMEOUT_MINUTES,
+    SHIP_CATEGORIES,
     SIGNAL_NEW_SHIP,
     SUBENTRY_TYPE_AREA,
+    ship_category,
 )
 from .coordinator import AISStreamClient, ShipData
 from .entity import AISStreamShipEntity
@@ -41,13 +43,6 @@ class AISStreamSensorDescription(SensorEntityDescription):
     """Describes an aisstream.io sensor."""
 
     value_fn: Callable[[ShipData], object]
-
-
-def _heading(ship: ShipData) -> int | None:
-    # 511 means "not available" per the AIS spec.
-    if ship.true_heading is None or ship.true_heading == 511:
-        return None
-    return ship.true_heading
 
 
 SENSOR_DESCRIPTIONS: tuple[AISStreamSensorDescription, ...] = (
@@ -71,7 +66,7 @@ SENSOR_DESCRIPTIONS: tuple[AISStreamSensorDescription, ...] = (
         translation_key="true_heading",
         native_unit_of_measurement=DEGREE,
         state_class=SensorStateClass.MEASUREMENT,
-        value_fn=_heading,
+        value_fn=lambda ship: ship.true_heading,
     ),
     AISStreamSensorDescription(
         key="navigational_status",
@@ -88,6 +83,28 @@ SENSOR_DESCRIPTIONS: tuple[AISStreamSensorDescription, ...] = (
         key="destination",
         translation_key="destination",
         value_fn=lambda ship: ship.destination or None,
+    ),
+    AISStreamSensorDescription(
+        key="eta",
+        translation_key="eta",
+        device_class=SensorDeviceClass.TIMESTAMP,
+        value_fn=lambda ship: ship.eta,
+    ),
+    AISStreamSensorDescription(
+        key="ship_type",
+        translation_key="ship_type",
+        device_class=SensorDeviceClass.ENUM,
+        options=list(SHIP_CATEGORIES),
+        value_fn=lambda ship: ship_category(ship.ship_type),
+    ),
+    AISStreamSensorDescription(
+        key="draught",
+        translation_key="draught",
+        native_unit_of_measurement=UnitOfLength.METERS,
+        device_class=SensorDeviceClass.DISTANCE,
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=1,
+        value_fn=lambda ship: ship.draught,
     ),
 )
 
@@ -146,9 +163,8 @@ class AISStreamSensor(AISStreamShipEntity, SensorEntity):
         mmsi: str,
         description: AISStreamSensorDescription,
     ) -> None:
-        super().__init__(client, mmsi)
+        super().__init__(client, mmsi, "sensor", description.key)
         self.entity_description = description
-        self._attr_unique_id = f"{mmsi}_{description.key}"
 
     @property
     def native_value(self):

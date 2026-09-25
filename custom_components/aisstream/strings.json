@@ -69,6 +69,25 @@
       "true_heading": { "name": "Heading" },
       "navigational_status": { "name": "Navigational status" },
       "destination": { "name": "Destination" },
+      "eta": { "name": "ETA" },
+      "ship_type": {
+        "name": "Ship type",
+        "state": {
+          "cargo": "Cargo",
+          "tanker": "Tanker",
+          "passenger": "Passenger",
+          "high_speed": "High-speed craft",
+          "fishing": "Fishing",
+          "tug": "Tug",
+          "special": "Special craft",
+          "sailing": "Sailing",
+          "pleasure": "Pleasure craft",
+          "military": "Military",
+          "other": "Other",
+          "unknown": "Unknown"
+        }
+      },
+      "draught": { "name": "Draught" },
       "vessels_in_area": { "name": "Vessels in area" }
     }
   }

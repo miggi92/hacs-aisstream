@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 import logging
 
@@ -17,6 +17,10 @@ from homeassistant.util import dt as dt_util
 from .const import (
     AISSTREAM_WS_URL,
     COG_NOT_AVAILABLE,
+    DEFAULT_BOX_EAST,
+    DEFAULT_BOX_NORTH,
+    DEFAULT_BOX_SOUTH,
+    DEFAULT_BOX_WEST,
     HEADING_NOT_AVAILABLE,
     RECONNECT_DELAY_MAX,
     RECONNECT_DELAY_MIN,
@@ -88,7 +92,8 @@ class ShipData:
     draught: float | None = None
     last_position_update: datetime | None = None
     last_static_update: datetime | None = None
-    # Area subentry this vessel is assigned to (the first one it was seen in).
+    # Subentry this vessel is assigned to: its own "vessel" subentry if it is
+    # tracked individually, else the first area it was seen in.
     area_id: str | None = None
 
 
@@ -100,8 +105,24 @@ class AreaFilter:
     mmsi: frozenset[str]
 
 
+@dataclass
+class Subscription:
+    """One aisstream.io subscription, served by its own websocket connection.
+
+    aisstream.io combines bounding boxes and the MMSI filter of a subscription
+    with AND, so vessels tracked world-wide can't share a subscription with
+    the area boxes and get a connection of their own.
+    """
+
+    name: str
+    bounding_boxes: list[list[list[float]]]
+    mmsi_filter: list[str] | None
+    available: bool = False
+    ws: aiohttp.ClientWebSocketResponse | None = field(default=None, repr=False)
+
+
 class AISStreamClient:
-    """Owns the persistent websocket connection to aisstream.io."""
+    """Owns the persistent websocket connections to aisstream.io."""
 
     def __init__(
         self,
@@ -109,12 +130,16 @@ class AISStreamClient:
         entry_id: str,
         api_key: str,
         areas: dict[str, AreaFilter],
+        vessels: dict[str, ShipData] | None = None,
     ) -> None:
         self.hass = hass
         self.entry_id = entry_id
-        self.ships: dict[str, ShipData] = {}
-        self.available = False
+        # Individually tracked vessels are known upfront so their entities
+        # exist before the first message arrives.
+        vessels = vessels or {}
+        self.ships: dict[str, ShipData] = dict(vessels)
         self.areas = areas
+        self.tracked_mmsi = frozenset(vessels)
         self.bounding_boxes = [
             box for area in areas.values() for box in area.bounding_boxes
         ]
@@ -124,26 +149,64 @@ class AISStreamClient:
         # Vessels restored from the registry haven't reported since this.
         self.started_at = dt_util.utcnow()
 
+        self.subscriptions: list[Subscription] = []
+        self._areas_subscription: Subscription | None = None
+        self._vessels_subscription: Subscription | None = None
+        if areas:
+            self._areas_subscription = Subscription(
+                "areas", self.bounding_boxes, mmsi_filter or None
+            )
+            self.subscriptions.append(self._areas_subscription)
+        if vessels:
+            self._vessels_subscription = Subscription(
+                "vessels",
+                [
+                    [
+                        [DEFAULT_BOX_SOUTH, DEFAULT_BOX_WEST],
+                        [DEFAULT_BOX_NORTH, DEFAULT_BOX_EAST],
+                    ]
+                ],
+                sorted(vessels),
+            )
+            self.subscriptions.append(self._vessels_subscription)
+
         self._api_key = api_key
-        self._mmsi_filter = mmsi_filter or None
-        self._session: aiohttp.ClientSession | None = None
-        self._ws: aiohttp.ClientWebSocketResponse | None = None
-        self._task: asyncio.Task | None = None
+        self._tasks: list[asyncio.Task] = []
         self._stopping = False
 
+    @property
+    def available(self) -> bool:
+        """Return whether the area subscription is connected."""
+        return (
+            self._areas_subscription is not None
+            and self._areas_subscription.available
+        )
+
+    def ship_available(self, mmsi: str) -> bool:
+        """Return whether the connection delivering a vessel's data is up."""
+        if mmsi not in self.ships:
+            return False
+        if mmsi in self.tracked_mmsi:
+            return self._vessels_subscription.available
+        return self.available
+
     def start(self) -> None:
-        """Start the background connection task."""
-        self._task = self.hass.loop.create_task(self._run())
+        """Start one background connection task per subscription."""
+        self._tasks = [
+            self.hass.loop.create_task(self._run(subscription))
+            for subscription in self.subscriptions
+        ]
 
     async def stop(self) -> None:
-        """Stop the connection task and close the session."""
+        """Stop the connection tasks and close their sessions."""
         self._stopping = True
-        if self._ws is not None and not self._ws.closed:
-            await self._ws.close()
-        if self._task is not None:
-            self._task.cancel()
+        for subscription in self.subscriptions:
+            if subscription.ws is not None and not subscription.ws.closed:
+                await subscription.ws.close()
+        for task in self._tasks:
+            task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
-                await self._task
+                await task
 
     def forget_ship(self, mmsi: str) -> None:
         """Drop a vessel so it is set up from scratch when seen again."""
@@ -152,43 +215,50 @@ class AISStreamClient:
                 self.hass, f"{SIGNAL_SHIP_REMOVED}_{self.entry_id}", mmsi
             )
 
-    def _subscribe_message(self) -> dict:
+    def _subscribe_message(self, subscription: Subscription) -> dict:
         # Deliberately not sending FilterMessageTypes: aisstream.io only has a
         # confirmed single-value example (["PositionReport"]) for that field,
         # and unfiltered subscriptions are the reliably documented case.
         # Unwanted message types are discarded client-side in _handle_message.
         message: dict = {
             "APIKey": self._api_key,
-            "BoundingBoxes": self.bounding_boxes,
+            "BoundingBoxes": subscription.bounding_boxes,
         }
-        if self._mmsi_filter:
-            message["FiltersShipMMSI"] = self._mmsi_filter
+        if subscription.mmsi_filter:
+            message["FiltersShipMMSI"] = subscription.mmsi_filter
         return message
 
-    async def _run(self) -> None:
-        self._session = aiohttp.ClientSession()
+    async def _run(self, subscription: Subscription) -> None:
+        session = aiohttp.ClientSession()
         delay = RECONNECT_DELAY_MIN
         try:
             while not self._stopping:
                 connected_at = dt_util.utcnow()
                 try:
-                    await self._connect_and_listen()
+                    await self._connect_and_listen(session, subscription)
                 except asyncio.CancelledError:
                     raise
                 except aiohttp.WSServerHandshakeError as err:
                     if err.status == 429:
                         _LOGGER.warning(
-                            "aisstream.io rejected the connection with HTTP 429"
-                            " (too many connections or rate-limited); make sure"
-                            " no other client uses this account's connection"
-                            " slots"
+                            "aisstream.io rejected the %s connection with HTTP"
+                            " 429 (too many connections or rate-limited); make"
+                            " sure no other client uses this account's"
+                            " connection slots",
+                            subscription.name,
                         )
                     else:
-                        _LOGGER.warning("aisstream.io connection error: %s", err)
+                        _LOGGER.warning(
+                            "aisstream.io %s connection error: %s",
+                            subscription.name,
+                            err,
+                        )
                 except Exception as err:  # noqa: BLE001
-                    _LOGGER.warning("aisstream.io connection error: %s", err)
+                    _LOGGER.warning(
+                        "aisstream.io %s connection error: %s", subscription.name, err
+                    )
                 finally:
-                    self.available = False
+                    subscription.available = False
 
                 if self._stopping:
                     break
@@ -202,21 +272,26 @@ class AISStreamClient:
                 await asyncio.sleep(delay)
                 delay = min(delay * 2, RECONNECT_DELAY_MAX)
         finally:
-            await self._session.close()
+            await session.close()
 
-    async def _connect_and_listen(self) -> None:
+    async def _connect_and_listen(
+        self, session: aiohttp.ClientSession, subscription: Subscription
+    ) -> None:
         # aisstream.io requires permessage-deflate (compress=15) to serve the
         # full message bandwidth; without it little or no data arrives.
-        async with self._session.ws_connect(
+        async with session.ws_connect(
             AISSTREAM_WS_URL, heartbeat=30, compress=15
         ) as ws:
-            self._ws = ws
-            await ws.send_json(self._subscribe_message())
-            self.available = True
+            subscription.ws = ws
+            await ws.send_json(self._subscribe_message(subscription))
+            subscription.available = True
             _LOGGER.info(
-                "Subscribed to aisstream.io with bounding boxes %s%s",
-                self.bounding_boxes,
-                f" and MMSI filter {self._mmsi_filter}" if self._mmsi_filter else "",
+                "Subscribed to aisstream.io (%s) with bounding boxes %s%s",
+                subscription.name,
+                subscription.bounding_boxes,
+                f" and MMSI filter {subscription.mmsi_filter}"
+                if subscription.mmsi_filter
+                else "",
             )
 
             async for msg in ws:

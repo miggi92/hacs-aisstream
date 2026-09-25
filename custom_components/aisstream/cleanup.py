@@ -41,11 +41,12 @@ def async_remove_stale_vessels(
 
     Vessels that haven't reported since setup (e.g. after a restart) count
     as last seen at ``unseen_since``, or as stale if that is None. Vessels
-    on an area's MMSI list are always kept. Limited to one area if
-    ``subentry_id`` is given. Returns the number of removed devices.
+    on an area's MMSI list and individually tracked vessels are always kept.
+    Limited to one area if ``subentry_id`` is given. Returns the number of removed devices.
     """
     threshold = dt_util.utcnow() - max_age
     listed = {mmsi for area in client.areas.values() for mmsi in area.mmsi}
+    listed |= client.tracked_mmsi
     device_registry = dr.async_get(hass)
     removed = 0
 

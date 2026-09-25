@@ -86,7 +86,7 @@ class AISStreamShipEntity(Entity):
 
     @property
     def available(self) -> bool:
-        return self._client.available and self._mmsi in self._client.ships
+        return self._client.ship_available(self._mmsi)
 
     async def async_added_to_hass(self) -> None:
         self.async_on_remove(

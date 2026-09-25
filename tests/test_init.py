@@ -5,6 +5,7 @@ from datetime import timedelta
 
 from homeassistant.config_entries import ConfigSubentryData
 from homeassistant.core import HomeAssistant
+from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import (
@@ -12,7 +13,13 @@ from pytest_homeassistant_custom_component.common import (
     async_fire_time_changed,
 )
 
-from custom_components.aisstream.const import DOMAIN, SUBENTRY_TYPE_AREA
+from custom_components.aisstream import async_remove_config_entry_device
+from custom_components.aisstream.cleanup import async_remove_stale_vessels
+from custom_components.aisstream.const import (
+    DOMAIN,
+    SUBENTRY_TYPE_AREA,
+    SUBENTRY_TYPE_VESSEL,
+)
 
 SANTANDER = {"location": {"latitude": 43.46, "longitude": -3.79, "radius": 5000}}
 MMSI_IN = "224612000"
@@ -37,6 +44,12 @@ def _entry(hass: HomeAssistant, area_data: dict = SANTANDER) -> MockConfigEntry:
     return entry
 
 
+def _connect(client) -> None:
+    """Pretend every websocket connection is up."""
+    for subscription in client.subscriptions:
+        subscription.available = True
+
+
 def _position(client, mmsi: str, lat: float, lon: float, name: str = "TEST SHIP"):
     client._handle_message(
         {
@@ -58,7 +71,7 @@ async def test_vessel_entities_devices_and_geo_location(hass: HomeAssistant) -> 
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
     client = hass.data[DOMAIN][entry.entry_id]
-    client.available = True
+    _connect(client)
 
     _position(client, MMSI_IN, 43.46, -3.79)
     await hass.async_block_till_done()
@@ -162,7 +175,7 @@ async def test_static_data_marker_and_entity_ids(hass: HomeAssistant) -> None:
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
     client = hass.data[DOMAIN][entry.entry_id]
-    client.available = True
+    _connect(client)
 
     _position(client, MMSI_IN, 43.46, -3.79)
     _static(
@@ -218,7 +231,7 @@ async def test_class_b_vessels_are_tracked(hass: HomeAssistant) -> None:
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
     client = hass.data[DOMAIN][entry.entry_id]
-    client.available = True
+    _connect(client)
 
     client._handle_message(
         {
@@ -261,6 +274,138 @@ async def test_class_b_vessels_are_tracked(hass: HomeAssistant) -> None:
     assert "circle" in tracker.attributes["entity_picture"]
 
 
+TRACKED = "211331640"
+
+
+def _vessel_entry(hass: HomeAssistant) -> MockConfigEntry:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="AISstream.io",
+        data={"api_key": "test"},
+        subentries_data=[
+            ConfigSubentryData(
+                data=SANTANDER,
+                subentry_id="santander",
+                subentry_type=SUBENTRY_TYPE_AREA,
+                title="Santander",
+                unique_id=None,
+            ),
+            ConfigSubentryData(
+                data={"mmsi": TRACKED, "name": "My Ferry"},
+                subentry_id="ferry",
+                subentry_type=SUBENTRY_TYPE_VESSEL,
+                title="My Ferry",
+                unique_id=None,
+            ),
+        ],
+    )
+    entry.add_to_hass(hass)
+    return entry
+
+
+async def test_tracked_vessel_anywhere(hass: HomeAssistant) -> None:
+    """A tracked vessel gets entities upfront and is followed outside areas."""
+    entry = _vessel_entry(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    client = hass.data[DOMAIN][entry.entry_id]
+
+    # Areas and tracked vessels use separate subscriptions: aisstream.io ANDs
+    # bounding boxes and MMSI filters.
+    areas, vessels = client.subscriptions
+    assert areas.mmsi_filter is None
+    assert vessels.mmsi_filter == [TRACKED]
+    assert vessels.bounding_boxes == [[[-90.0, -180.0], [90.0, 180.0]]]
+
+    ent_reg = er.async_get(hass)
+    tracker = ent_reg.async_get_entity_id("device_tracker", DOMAIN, f"{TRACKED}_position")
+    assert tracker == "device_tracker.aisstream_my_ferry_position"
+    assert ent_reg.async_get(tracker).config_subentry_id == "ferry"
+    # Only the vessel connection matters for its entities.
+    assert hass.states.get(tracker).state == "unavailable"
+    vessels.available = True
+
+    # Far away from every area.
+    _position(client, TRACKED, 54.3, 10.1, name="REAL NAME")
+    await hass.async_block_till_done()
+    state = hass.states.get(tracker)
+    assert float(state.attributes["latitude"]) == 54.3
+    assert state.attributes["ship_name"] == "REAL NAME"
+    assert hass.states.async_all("geo_location") == []
+
+    dev_reg = dr.async_get(hass)
+    device = dev_reg.async_get(ent_reg.async_get(tracker).device_id)
+    assert device.name == "REAL NAME"
+    assert device.via_device_id is None
+
+
+async def test_tracked_vessel_removed_with_subentry(hass: HomeAssistant) -> None:
+    """Tracked vessel devices go with their subentry, not on their own."""
+    entry = _vessel_entry(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    dev_reg = dr.async_get(hass)
+
+    def _device():
+        return next(
+            (
+                d
+                for d in dr.async_entries_for_config_entry(dev_reg, entry.entry_id)
+                if (DOMAIN, TRACKED) in d.identifiers
+            ),
+            None,
+        )
+
+    assert _device() is not None
+    assert not await async_remove_config_entry_device(hass, entry, _device())
+
+    # Never reported, but still kept by the stale vessel cleanup.
+    client = hass.data[DOMAIN][entry.entry_id]
+    assert (
+        async_remove_stale_vessels(hass, entry, client, timedelta(minutes=0)) == 0
+    )
+    assert _device() is not None
+    assert TRACKED in client.ships
+
+    assert hass.config_entries.async_remove_subentry(entry, "ferry")
+    await hass.async_block_till_done()
+    assert _device() is None
+
+
+async def test_vessel_subentry_flow(hass: HomeAssistant) -> None:
+    """The vessel flow validates the MMSI and rejects duplicates."""
+    entry = _vessel_entry(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    result = await hass.config_entries.subentries.async_init(
+        (entry.entry_id, SUBENTRY_TYPE_VESSEL), context={"source": "user"}
+    )
+    assert result["type"] is FlowResultType.FORM
+
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {"mmsi": "12345"}
+    )
+    assert result["errors"] == {"mmsi": "invalid_mmsi"}
+
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {"mmsi": TRACKED}
+    )
+    assert result["errors"] == {"mmsi": "vessel_already_tracked"}
+
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {"mmsi": " 244660000 "}
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["title"] == "MMSI 244660000"
+    assert result["data"] == {"mmsi": "244660000"}
+    await hass.async_block_till_done()
+
+    client = hass.data[DOMAIN][entry.entry_id]
+    assert client.subscriptions[1].mmsi_filter == ["211331640", "244660000"]
+
+
 def _vessel_mmsis(hass: HomeAssistant, entry: MockConfigEntry) -> set[str]:
     return {
         identifier
@@ -287,7 +432,7 @@ async def test_remove_stale_vessels_button(hass: HomeAssistant) -> None:
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
     client = hass.data[DOMAIN][entry.entry_id]
-    client.available = True
+    _connect(client)
 
     _position(client, MMSI_IN, 43.46, -3.79)
     _position(client, stale_mmsi, 43.46, -3.79, name="OLD SHIP")

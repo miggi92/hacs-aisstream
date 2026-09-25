@@ -14,6 +14,7 @@ Home Assistant custom integration for [aisstream.io](https://aisstream.io) - liv
 - One Home Assistant **device per vessel**, created automatically the moment it's first seen inside one of your areas and **assigned to that area** (shown as connected via the area's device; a vessel keeps the area it was first seen in), with:
   - a `device_tracker` entity showing the vessel's live position on the map,
   - `sensor` entities for speed over ground, course over ground, true heading, navigational status and destination.
+- A short-lived **`geo_location` event per vessel currently inside one of your areas** (source `aisstream`, distance in km from the area's center). Events disappear automatically once a vessel leaves its area or hasn't reported a position for 20 minutes, so they are ideal for showing "ships around here right now" on a map (see below).
 - A **"Vessels in area" sensor** per area, showing how many vessels have reported a position inside that specific area within the last 20 minutes - handy for harbor-traffic dashboards and automations. Its attributes also expose live connection diagnostics (`connected`, `messages_received`, `last_message_at`, the resolved `bounding_box`) to help tell a real connection problem apart from a quiet/uncovered area.
 
 ## Installation
@@ -48,6 +49,16 @@ Each area can be edited or removed later from the integration's entry page. Remo
 ### A note on combining areas and MMSI filters
 
 All areas you add share one aisstream.io subscription (one WebSocket connection, multiple bounding boxes). If you set MMSI filters on some areas, they currently apply across the whole subscription rather than being strictly scoped to that one area - for the common cases (either area-only tracking, or MMSI-only tracking with a single account) this makes no difference. It only matters if you mix a narrow area in one entry with an MMSI filter in another: a listed vessel could then show up as "in range" for a different area's box than the one its filter was added under.
+
+## Showing vessels on a map
+
+Add a map card and list `aisstream` as a geolocation source - every vessel currently inside one of your areas is shown, and ships that leave drop off the map on their own:
+
+```yaml
+type: map
+geo_location_sources:
+  - aisstream
+```
 
 ## Notes
 

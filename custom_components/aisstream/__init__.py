@@ -15,7 +15,11 @@ from .geo import resolve_area_box
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS: list[Platform] = [Platform.DEVICE_TRACKER, Platform.SENSOR]
+PLATFORMS: list[Platform] = [
+    Platform.DEVICE_TRACKER,
+    Platform.GEO_LOCATION,
+    Platform.SENSOR,
+]
 
 
 def _collect_areas(hass: HomeAssistant, entry: ConfigEntry) -> dict[str, AreaFilter]:

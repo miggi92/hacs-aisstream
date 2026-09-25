@@ -1,0 +1,50 @@
+name: Release bei Milestone-Abschluss
+
+on:
+  milestone:
+    types:
+      - closed
+
+jobs:
+  create_release:
+    name: Release aus Milestone-Titel erstellen
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: 🛍️ Checkout the repo
+        uses: actions/checkout@v7
+
+      - name: 🚀 Release erstellen
+        shell: bash
+        env:
+          # Der automatische GITHUB_TOKEN löst absichtlich keine Folge-Workflows
+          # aus (Schutz vor Trigger-Schleifen) - ein damit erstellter Release
+          # würde also NICHT den "release: published"-Trigger in publish.yaml
+          # auslösen. RELEASE_TOKEN ist ein Personal Access Token mit
+          # "Contents: Read and write" auf dieses Repo, hinterlegt als
+          # Repository-Secret unter Settings > Secrets and variables > Actions.
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: |
+          TITLE="${{ github.event.milestone.title }}"
+
+          # Nur auslösen, wenn der Milestone-Titel wie eine Version aussieht
+          # (optionales führendes "v", danach X.Y.Z). Alles andere wird
+          # bewusst übersprungen statt den Workflow fehlschlagen zu lassen -
+          # nicht jeder Milestone ist ein Release.
+          if ! [[ "$TITLE" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Milestone-Titel '$TITLE' sieht nicht wie eine Version aus - überspringe."
+            exit 0
+          fi
+
+          TAG="$TITLE"
+          if [[ "$TAG" != v* ]]; then
+            TAG="v$TAG"
+          fi
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG existiert bereits - überspringe."
+            exit 0
+          fi
+
+          gh release create "$TAG" --title "$TAG" --target main --generate-notes

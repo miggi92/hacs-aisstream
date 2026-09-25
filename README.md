@@ -13,7 +13,9 @@ Home Assistant custom integration for [aisstream.io](https://aisstream.io) - liv
   - Optionally add a comma-separated list of **MMSI numbers** to track specific vessels within (or regardless of) that area.
 - One Home Assistant **device per vessel**, created automatically the moment it's first seen inside one of your areas and **assigned to that area** (shown as connected via the area's device; a vessel keeps the area it was first seen in), with:
   - a `device_tracker` entity showing the vessel's live position on the map,
-  - `sensor` entities for speed over ground, course over ground, true heading, navigational status and destination.
+  - `sensor` entities for speed over ground, course over ground, true heading, navigational status, destination, ETA, ship type (cargo, tanker, passenger, fishing, ...) and draught,
+  - further static data (IMO number, call sign, length/width) as attributes of the `device_tracker`.
+- Both class A (commercial shipping) and class B (yachts, small fishing boats, ...) AIS transponders are supported.
 - A short-lived **`geo_location` event per vessel currently inside one of your areas** (source `aisstream`, distance in km from the area's center). Events disappear automatically once a vessel leaves its area or hasn't reported a position for 20 minutes, so they are ideal for showing "ships around here right now" on a map (see below).
 - A **"Vessels in area" sensor** per area, showing how many vessels have reported a position inside that specific area within the last 20 minutes - handy for harbor-traffic dashboards and automations. Its attributes also expose live connection diagnostics (`connected`, `messages_received`, `last_message_at`, the resolved `bounding_box`) to help tell a real connection problem apart from a quiet/uncovered area.
 
@@ -60,11 +62,47 @@ geo_location_sources:
   - aisstream
 ```
 
+Each vessel is drawn as an **arrow pointing in its heading**, coloured by ship type (green: cargo, red: tanker, blue: passenger, orange: fishing, turquoise: tug/special craft, magenta: sailing/pleasure craft, yellow: high-speed craft, grey: unknown). Vessels that aren't moving, or are at anchor/moored, are drawn as a dot. The same markers are used for the vessels' `device_tracker` entities, e.g.:
+
+```yaml
+type: map
+entities:
+  - device_tracker.aisstream_ever_given_position
+```
+
+If you prefer plain icons (a ferry, sail boat, anchor, ...) over the arrows, set `label_mode: icon` for an entity in the map card.
+
+## Keeping vessels out of the logbook and database
+
+Vessels come and go all the time, and every position report of a vessel updates its map event, so they can quickly flood the logbook and grow the recorder database. Home Assistant has no per-integration or per-device-class switch for this, but every vessel entity id created by this integration starts with `aisstream_` (e.g. `sensor.aisstream_ever_given_speed`, `geo_location.aisstream_ever_given_nearby`), so a single glob in `configuration.yaml` excludes all of them:
+
+```yaml
+logbook:
+  exclude:
+    entity_globs:
+      - "*.aisstream_*"
+
+# Optional: don't store vessel history in the database at all.
+# This also removes them from the logbook and the history graphs.
+recorder:
+  exclude:
+    entity_globs:
+      - "*.aisstream_*"
+```
+
+The per-area "Vessels in area" sensors don't carry the prefix and stay recorded. Vessel entities created by an older version of this integration keep their old entity ids; remove those devices once (they are re-created with the new ids when the vessel is seen again) or rename them.
+
+## About the data
+
+- **Destination** is free text typed into the transponder by the ship's crew, not an id from aisstream.io. Most crews use the port's [UN/LOCODE](https://unece.org/trade/uncefact/unlocode) (e.g. `DEHAM` = Hamburg, `NLRTM` = Rotterdam, `ESSDR` = Santander), sometimes with a space (`DE HAM`) or as a route (`NLRTM>DEHAM`) - but anything goes, including typos and outdated entries.
+- **ETA** is also entered by the crew and has no year; it is assumed to lie within half a year of now.
+- Ship type, dimensions, draught, ETA and destination come from static-data messages, which vessels only broadcast every few minutes - these sensors can stay unknown for a while after a vessel first shows up.
+
 ## Notes
 
 - Brand images (icon and logo, including dark variants) ship in `custom_components/aisstream/brand/` and are picked up automatically by Home Assistant 2026.3 or newer.
 - Data is push-based (`iot_class: cloud_push`); entities update as soon as a new AIS message for that vessel arrives, there is no polling interval to configure.
-- `TrueHeading` value `511` ("not available" per the AIS spec) is reported as unknown.
+- AIS "not available" values (`TrueHeading` 511, `Cog` 360, `Sog` 102.3) are reported as unknown.
 
 ## Development
 

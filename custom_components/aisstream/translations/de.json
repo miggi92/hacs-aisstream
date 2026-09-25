@@ -69,6 +69,25 @@
       "true_heading": { "name": "Steuerkurs" },
       "navigational_status": { "name": "Navigationsstatus" },
       "destination": { "name": "Ziel" },
+      "eta": { "name": "Voraussichtliche Ankunft" },
+      "ship_type": {
+        "name": "Schiffstyp",
+        "state": {
+          "cargo": "Frachter",
+          "tanker": "Tanker",
+          "passenger": "Passagierschiff",
+          "high_speed": "Schnellfahrzeug",
+          "fishing": "Fischerei",
+          "tug": "Schlepper",
+          "special": "Spezialfahrzeug",
+          "sailing": "Segelschiff",
+          "pleasure": "Sportboot",
+          "military": "Militär",
+          "other": "Sonstiges",
+          "unknown": "Unbekannt"
+        }
+      },
+      "draught": { "name": "Tiefgang" },
       "vessels_in_area": { "name": "Schiffe im Gebiet" }
     }
   }

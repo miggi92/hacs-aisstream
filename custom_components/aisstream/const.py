@@ -52,3 +52,56 @@ NAVIGATIONAL_STATUS = {
     14: "AIS-SART / MOB / EPIRB",
     15: "Undefined",
 }
+
+# AIS "not available" sentinel values.
+SOG_NOT_AVAILABLE = 102.3
+COG_NOT_AVAILABLE = 360.0
+HEADING_NOT_AVAILABLE = 511
+
+# Vessels slower than this (knots) are drawn as a dot instead of an arrow.
+STATIONARY_SOG_KNOTS = 0.5
+
+# Vessel categories derived from the AIS ship type code, with the marker
+# colour (loosely following the common MarineTraffic colour scheme) and icon.
+SHIP_CATEGORY_UNKNOWN = "unknown"
+SHIP_CATEGORIES: dict[str, tuple[str, str]] = {
+    "cargo": ("#4caf50", "mdi:ferry"),
+    "tanker": ("#e53935", "mdi:ferry"),
+    "passenger": ("#1e88e5", "mdi:ferry"),
+    "high_speed": ("#fdd835", "mdi:speedboat"),
+    "fishing": ("#ff8a65", "mdi:fish"),
+    "tug": ("#00acc1", "mdi:ship-wheel"),
+    "special": ("#00acc1", "mdi:ship-wheel"),
+    "sailing": ("#d500f9", "mdi:sail-boat"),
+    "pleasure": ("#d500f9", "mdi:sail-boat"),
+    "military": ("#546e7a", "mdi:ferry"),
+    "other": ("#8d6e63", "mdi:ferry"),
+    SHIP_CATEGORY_UNKNOWN: ("#9e9e9e", "mdi:ferry"),
+}
+
+
+def ship_category(ship_type: int | None) -> str:
+    """Map an AIS ship type code (ITU-R M.1371) to a coarse category."""
+    if not ship_type:
+        return SHIP_CATEGORY_UNKNOWN
+    if ship_type == 30:
+        return "fishing"
+    if ship_type in (31, 32, 52):
+        return "tug"
+    if ship_type in (33, 34, 50, 51, 53, 54, 55, 58, 59):
+        return "special"
+    if ship_type == 35:
+        return "military"
+    if ship_type == 36:
+        return "sailing"
+    if ship_type == 37:
+        return "pleasure"
+    if 40 <= ship_type <= 49:
+        return "high_speed"
+    if 60 <= ship_type <= 69:
+        return "passenger"
+    if 70 <= ship_type <= 79:
+        return "cargo"
+    if 80 <= ship_type <= 89:
+        return "tanker"
+    return "other"

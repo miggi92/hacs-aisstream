@@ -12,7 +12,7 @@ import logging
 
 from homeassistant.components.geo_location import GeolocationEvent
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import UnitOfLength
+from homeassistant.const import ATTR_ENTITY_PICTURE, UnitOfLength
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -25,9 +25,12 @@ from .const import (
     PRESENCE_TIMEOUT_MINUTES,
     SIGNAL_NEW_SHIP,
     SIGNAL_SHIP_UPDATE,
+    ship_category,
 )
 from .coordinator import AISStreamClient, ShipData
+from .entity import vessel_entity_id
 from .geo import point_in_box
+from .marker import ship_icon, ship_picture
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -68,10 +71,16 @@ async def async_setup_entry(
     @callback
     def _sync(*_args) -> None:
         new_events = []
+        taken = {event.entity_id for event in events.values()}
         for mmsi, ship in list(client.ships.items()):
             present = _is_present(client, ship)
             if present and mmsi not in events:
                 event = AISStreamGeolocationEvent(client, entry, mmsi, _removed)
+                # Events aren't in the entity registry, so a vessel sharing
+                # its name with another one falls back to an MMSI-based id.
+                if event.entity_id in taken or hass.states.get(event.entity_id):
+                    event.entity_id = f"geo_location.aisstream_{mmsi}_nearby"
+                taken.add(event.entity_id)
                 events[mmsi] = event
                 new_events.append(event)
             elif not present and mmsi in events:
@@ -90,9 +99,9 @@ class AISStreamGeolocationEvent(GeolocationEvent):
     """A vessel currently inside one of the monitored areas."""
 
     _attr_should_poll = False
-    _attr_icon = "mdi:ferry"
     _attr_source = DOMAIN
     _attr_unit_of_measurement = UnitOfLength.KILOMETERS
+    _unrecorded_attributes = frozenset({ATTR_ENTITY_PICTURE})
 
     def __init__(
         self,
@@ -106,6 +115,7 @@ class AISStreamGeolocationEvent(GeolocationEvent):
         self._mmsi = mmsi
         self._removed_callback = on_remove
         self._removing = False
+        self.entity_id = vessel_entity_id("geo_location", self.ship, "nearby")
 
     @property
     def mmsi(self) -> str:
@@ -118,6 +128,14 @@ class AISStreamGeolocationEvent(GeolocationEvent):
     @property
     def name(self) -> str:
         return self.ship.name or f"MMSI {self._mmsi}"
+
+    @property
+    def icon(self) -> str:
+        return ship_icon(self.ship)
+
+    @property
+    def entity_picture(self) -> str:
+        return ship_picture(self.ship)
 
     @property
     def latitude(self) -> float | None:
@@ -147,8 +165,10 @@ class AISStreamGeolocationEvent(GeolocationEvent):
         return {
             "mmsi": ship.mmsi,
             "area": subentry.title if subentry else None,
+            "ship_type": ship_category(ship.ship_type),
             "sog_knots": ship.sog,
             "cog_degrees": ship.cog,
+            "true_heading": ship.true_heading,
             "destination": ship.destination,
             "last_position_update": ship.last_position_update.isoformat()
             if ship.last_position_update

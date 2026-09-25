@@ -5,7 +5,7 @@ import asyncio
 import contextlib
 import json
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 import logging
 
 import aiohttp
@@ -16,15 +16,53 @@ from homeassistant.util import dt as dt_util
 
 from .const import (
     AISSTREAM_WS_URL,
+    COG_NOT_AVAILABLE,
+    HEADING_NOT_AVAILABLE,
     RECONNECT_DELAY_MAX,
     RECONNECT_DELAY_MIN,
     SIGNAL_NEW_SHIP,
     SIGNAL_SHIP_UPDATE,
+    SOG_NOT_AVAILABLE,
     STABLE_CONNECTION_SECONDS,
 )
 from .geo import point_in_box
 
 _LOGGER = logging.getLogger(__name__)
+
+POSITION_MESSAGE_TYPES = (
+    "PositionReport",
+    "StandardClassBPositionReport",
+    "ExtendedClassBPositionReport",
+)
+
+
+def _available(value, not_available):
+    """Return value unless it is the AIS "not available" sentinel."""
+    if value is None or value >= not_available:
+        return None
+    return value
+
+
+def _parse_eta(eta: dict | None, now: datetime) -> datetime | None:
+    """Turn an AIS ETA (month/day/hour/minute, no year, UTC) into a datetime.
+
+    The year is picked so the ETA lands within half a year of now.
+    """
+    if not eta:
+        return None
+    month, day = eta.get("Month") or 0, eta.get("Day") or 0
+    hour, minute = eta.get("Hour", 24), eta.get("Minute", 60)
+    # 0 (month/day), 24 (hour) and 60 (minute) mean "not available".
+    if not month or not day or hour > 23 or minute > 59:
+        return None
+    for year in (now.year, now.year + 1, now.year - 1):
+        try:
+            candidate = datetime(year, month, day, hour, minute, tzinfo=UTC)
+        except ValueError:  # e.g. 29 February in a non-leap year
+            continue
+        if abs(candidate - now) <= timedelta(days=183):
+            return candidate
+    return None
 
 
 @dataclass
@@ -41,7 +79,12 @@ class ShipData:
     navigational_status: int | None = None
     ship_type: int | None = None
     call_sign: str | None = None
+    imo: int | None = None
     destination: str | None = None
+    eta: datetime | None = None
+    length: int | None = None
+    width: int | None = None
+    draught: float | None = None
     last_position_update: datetime | None = None
     last_static_update: datetime | None = None
     # Area subentry this vessel is assigned to (the first one it was seen in).
@@ -205,20 +248,39 @@ class AISStreamClient:
 
         now = dt_util.utcnow()
 
-        if message_type == "PositionReport":
-            report = message.get("PositionReport") or {}
+        if message_type in POSITION_MESSAGE_TYPES:
+            report = message.get(message_type) or {}
             ship.latitude = metadata.get("latitude", report.get("Latitude"))
             ship.longitude = metadata.get("longitude", report.get("Longitude"))
-            ship.sog = report.get("Sog")
-            ship.cog = report.get("Cog")
-            ship.true_heading = report.get("TrueHeading")
-            ship.navigational_status = report.get("NavigationalStatus")
+            ship.sog = _available(report.get("Sog"), SOG_NOT_AVAILABLE)
+            ship.cog = _available(report.get("Cog"), COG_NOT_AVAILABLE)
+            ship.true_heading = _available(
+                report.get("TrueHeading"), HEADING_NOT_AVAILABLE
+            )
+            if "NavigationalStatus" in report:
+                # Only class A vessels report a navigational status.
+                ship.navigational_status = report["NavigationalStatus"]
+            if message_type == "ExtendedClassBPositionReport":
+                self._apply_static(ship, report, type_key="Type")
             ship.last_position_update = now
         elif message_type == "ShipStaticData":
             static = message.get("ShipStaticData") or {}
-            ship.call_sign = static.get("CallSign", "").strip() or ship.call_sign
-            ship.destination = static.get("Destination", "").strip() or ship.destination
-            ship.ship_type = static.get("Type")
+            self._apply_static(ship, static, type_key="Type")
+            ship.destination = (
+                static.get("Destination") or ""
+            ).strip() or ship.destination
+            ship.imo = static.get("ImoNumber") or ship.imo
+            if draught := static.get("MaximumStaticDraught"):
+                ship.draught = draught
+            if "Eta" in static:
+                ship.eta = _parse_eta(static["Eta"], now)
+            ship.last_static_update = now
+        elif message_type == "StaticDataReport":
+            # Class B static data comes in two parts: A carries the name,
+            # B the type, call sign and dimensions.
+            static = message.get("StaticDataReport") or {}
+            if (part_b := static.get("ReportB") or {}).get("Valid"):
+                self._apply_static(ship, part_b, type_key="ShipType")
             ship.last_static_update = now
         else:
             return
@@ -234,6 +296,19 @@ class AISStreamClient:
             return
 
         async_dispatcher_send(self.hass, f"{SIGNAL_SHIP_UPDATE}_{mmsi}")
+
+    @staticmethod
+    def _apply_static(ship: ShipData, static: dict, type_key: str) -> None:
+        """Copy the static fields shared by class A and class B reports."""
+        ship.call_sign = (static.get("CallSign") or "").strip() or ship.call_sign
+        ship.ship_type = static.get(type_key) or ship.ship_type
+        dimension = static.get("Dimension") or {}
+        # A/B are the distances from the GPS antenna to bow/stern, C/D to
+        # port/starboard; zero means "not available".
+        length = (dimension.get("A") or 0) + (dimension.get("B") or 0)
+        width = (dimension.get("C") or 0) + (dimension.get("D") or 0)
+        ship.length = length or ship.length
+        ship.width = width or ship.width
 
     def _assign_area(self, ship: ShipData) -> str | None:
         """Return the area a vessel belongs to: MMSI lists first, then boxes."""

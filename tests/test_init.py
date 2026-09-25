@@ -138,3 +138,114 @@ async def test_orphaned_devices_removed_on_setup(hass: HomeAssistant) -> None:
         (DOMAIN, "999999999") in d.identifiers
         for d in dr.async_entries_for_config_entry(dev_reg, entry.entry_id)
     )
+
+
+def _static(client, mmsi: str, **static):
+    client._handle_message(
+        {
+            "MessageType": "ShipStaticData",
+            "MetaData": {"MMSI": int(mmsi), "ShipName": "TEST SHIP"},
+            "Message": {"ShipStaticData": static},
+        }
+    )
+
+
+async def test_static_data_marker_and_entity_ids(hass: HomeAssistant) -> None:
+    """Static data fills type/ETA/dimensions; entity ids share one prefix."""
+    entry = _entry(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    client = hass.data[DOMAIN][entry.entry_id]
+    client.available = True
+
+    _position(client, MMSI_IN, 43.46, -3.79)
+    _static(
+        client,
+        MMSI_IN,
+        Type=71,
+        ImoNumber=9811000,
+        CallSign="ABCD ",
+        Destination="ESSDR",
+        MaximumStaticDraught=12.5,
+        Dimension={"A": 200, "B": 50, "C": 20, "D": 20},
+        Eta={"Month": 12, "Day": 24, "Hour": 18, "Minute": 30},
+    )
+    await hass.async_block_till_done()
+
+    ent_reg = er.async_get(hass)
+    vessel_ids = [
+        e.entity_id
+        for e in ent_reg.entities.values()
+        if e.unique_id.startswith(MMSI_IN)
+    ]
+    assert vessel_ids
+    assert all(".aisstream_test_ship_" in entity_id for entity_id in vessel_ids)
+    assert hass.states.get("geo_location.aisstream_test_ship_nearby") is not None
+
+    assert hass.states.get("sensor.aisstream_test_ship_ship_type").state == "cargo"
+    assert hass.states.get("sensor.aisstream_test_ship_draught").state == "12.5"
+    eta = hass.states.get("sensor.aisstream_test_ship_eta").state
+    assert "-12-24T18:30:00" in eta
+
+    tracker = hass.states.get("device_tracker.aisstream_test_ship_position")
+    assert tracker.attributes["length_m"] == 250
+    assert tracker.attributes["width_m"] == 40
+    assert tracker.attributes["imo"] == 9811000
+    assert tracker.attributes["call_sign"] == "ABCD"
+    # Moving at 12.3 kn on course 90: a rotated green arrow.
+    picture = tracker.attributes["entity_picture"]
+    assert picture.startswith("data:image/svg+xml,")
+    assert "rotate%2890" in picture and "4caf50" in picture
+
+    dev_reg = dr.async_get(hass)
+    device = dev_reg.async_get_device(identifiers={(DOMAIN, MMSI_IN)})
+    assert device.model == "AIS vessel (cargo)"
+
+
+async def test_class_b_vessels_are_tracked(hass: HomeAssistant) -> None:
+    """Class B position reports create vessels; sentinels become unknown."""
+    entry = _entry(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    client = hass.data[DOMAIN][entry.entry_id]
+    client.available = True
+
+    client._handle_message(
+        {
+            "MessageType": "StandardClassBPositionReport",
+            "MetaData": {
+                "MMSI": 211000001,
+                "ShipName": "YACHT",
+                "latitude": 43.46,
+                "longitude": -3.79,
+            },
+            "Message": {
+                "StandardClassBPositionReport": {
+                    "Sog": 102.3,
+                    "Cog": 360,
+                    "TrueHeading": 511,
+                }
+            },
+        }
+    )
+    client._handle_message(
+        {
+            "MessageType": "StaticDataReport",
+            "MetaData": {"MMSI": 211000001, "ShipName": "YACHT"},
+            "Message": {
+                "StaticDataReport": {
+                    "ReportB": {"Valid": True, "ShipType": 37, "CallSign": "DY1"}
+                }
+            },
+        }
+    )
+    await hass.async_block_till_done()
+
+    ship = client.ships["211000001"]
+    assert ship.sog is None and ship.cog is None and ship.true_heading is None
+    assert hass.states.get("sensor.aisstream_yacht_ship_type").state == "pleasure"
+    assert hass.states.get("sensor.aisstream_yacht_speed").state == "unknown"
+    tracker = hass.states.get("device_tracker.aisstream_yacht_position")
+    assert tracker.attributes["icon"] == "mdi:sail-boat"
+    # Not moving / no course: a dot instead of an arrow.
+    assert "circle" in tracker.attributes["entity_picture"]

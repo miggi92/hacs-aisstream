@@ -9,8 +9,16 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import device_registry as dr
 
-from .const import CONF_API_KEY, CONF_MMSI_FILTER, DOMAIN, SUBENTRY_TYPE_AREA
-from .coordinator import AISStreamClient, AreaFilter
+from .const import (
+    CONF_API_KEY,
+    CONF_MMSI,
+    CONF_MMSI_FILTER,
+    CONF_NAME,
+    DOMAIN,
+    SUBENTRY_TYPE_AREA,
+    SUBENTRY_TYPE_VESSEL,
+)
+from .coordinator import AISStreamClient, AreaFilter, ShipData
 from .geo import resolve_area_box
 
 _LOGGER = logging.getLogger(__name__)
@@ -43,9 +51,22 @@ def _collect_areas(hass: HomeAssistant, entry: ConfigEntry) -> dict[str, AreaFil
     return areas
 
 
+def _collect_vessels(entry: ConfigEntry) -> dict[str, ShipData]:
+    """Return the individually tracked vessels, keyed by MMSI."""
+    return {
+        subentry.data[CONF_MMSI]: ShipData(
+            mmsi=subentry.data[CONF_MMSI],
+            name=subentry.data.get(CONF_NAME) or None,
+            area_id=subentry_id,
+        )
+        for subentry_id, subentry in entry.subentries.items()
+        if subentry.subentry_type == SUBENTRY_TYPE_VESSEL
+    }
+
+
 @callback
 def _remove_orphaned_devices(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Drop devices not tied to any existing area.
+    """Drop devices not tied to any existing area or tracked vessel.
 
     Covers vessels created before they were assigned to areas, and anything
     left behind by an area removed while the entry wasn't loaded.
@@ -74,9 +95,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         entry_id=entry.entry_id,
         api_key=entry.data[CONF_API_KEY],
         areas=areas,
+        vessels=_collect_vessels(entry),
     )
-    if areas:
-        client.start()
+    client.start()
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = client
 
@@ -93,9 +114,13 @@ async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> Non
 async def async_remove_config_entry_device(
     hass: HomeAssistant, entry: ConfigEntry, device: dr.DeviceEntry
 ) -> bool:
-    """Allow deleting vessel devices; area devices go with their area."""
+    """Allow deleting vessels seen in an area.
+
+    Area devices and individually tracked vessels go with their subentry.
+    """
+    tracked_mmsi = _collect_vessels(entry)
     return not any(
-        identifier in entry.subentries
+        identifier in entry.subentries or identifier in tracked_mmsi
         for domain, identifier in device.identifiers
         if domain == DOMAIN
     )

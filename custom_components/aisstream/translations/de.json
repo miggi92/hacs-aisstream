@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Mit aisstream.io verbinden",
-        "description": "API-Key von aisstream.io eingeben. Danach fügst du dein erstes zu überwachendes Gebiet hinzu (z.B. einen Hafen) - weitere Gebiete kannst du später hinzufügen, ohne den Key erneut einzugeben.",
+        "description": "API-Key von aisstream.io eingeben. Danach fügst du zu überwachende Gebiete (z.B. einen Hafen) und/oder einzelne zu verfolgende Schiffe hinzu - ohne den Key erneut einzugeben.",
         "data": {
           "api_key": "API-Key"
         }
@@ -57,7 +57,34 @@
         "zone_not_found": "Die ausgewählte Zone konnte nicht gefunden werden",
         "invalid_location": "Dem ausgewählten Standort fehlt Breiten-/Längengrad"
       }
-    }
+    },
+      "vessel": {
+        "entry_type": "Schiff",
+        "initiate_flow": {
+          "user": "Schiff verfolgen",
+          "reconfigure": "Schiff bearbeiten"
+        },
+        "step": {
+          "user": {
+            "description": "Verfolgt ein einzelnes Schiff anhand seiner MMSI-Nummer - weltweit, unabhängig von deinen Gebieten. Die MMSI findest du z. B. auf MarineTraffic oder VesselFinder.",
+            "data": {
+              "mmsi": "MMSI-Nummer (9 Ziffern)",
+              "name": "Name (optional, bis das Schiff seinen AIS-Namen sendet)"
+            }
+          },
+          "reconfigure": {
+            "description": "MMSI-Nummer oder Namen dieses Schiffs ändern.",
+            "data": {
+              "mmsi": "MMSI-Nummer (9 Ziffern)",
+              "name": "Name (optional, bis das Schiff seinen AIS-Namen sendet)"
+            }
+          }
+        },
+        "error": {
+          "invalid_mmsi": "Eine MMSI-Nummer besteht aus genau 9 Ziffern",
+          "vessel_already_tracked": "Dieses Schiff wird bereits verfolgt"
+        }
+      }
   },
   "entity": {
     "device_tracker": {

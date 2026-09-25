@@ -14,6 +14,10 @@ CONF_ZONE = "zone_entity_id"
 CONF_LOCATION = "location"
 
 SUBENTRY_TYPE_AREA = "area"
+SUBENTRY_TYPE_VESSEL = "vessel"
+
+CONF_MMSI = "mmsi"
+CONF_NAME = "name"
 
 DEFAULT_BOX_SOUTH = -90.0
 DEFAULT_BOX_WEST = -180.0

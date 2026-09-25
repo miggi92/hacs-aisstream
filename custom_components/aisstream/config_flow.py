@@ -28,7 +28,9 @@ from .const import (
     CONF_BOX_SOUTH,
     CONF_BOX_WEST,
     CONF_LOCATION,
+    CONF_MMSI,
     CONF_MMSI_FILTER,
+    CONF_NAME,
     CONF_ZONE,
     DEFAULT_BOX_EAST,
     DEFAULT_BOX_NORTH,
@@ -36,6 +38,7 @@ from .const import (
     DEFAULT_BOX_WEST,
     DOMAIN,
     SUBENTRY_TYPE_AREA,
+    SUBENTRY_TYPE_VESSEL,
 )
 from .geo import bounding_box_for_location, bounding_box_for_zone
 
@@ -225,7 +228,10 @@ class AISStreamConfigFlow(ConfigFlow, domain=DOMAIN):
         cls, config_entry: ConfigEntry
     ) -> dict[str, type[ConfigSubentryFlow]]:
         """Return subentries supported by this integration."""
-        return {SUBENTRY_TYPE_AREA: AreaSubentryFlowHandler}
+        return {
+            SUBENTRY_TYPE_AREA: AreaSubentryFlowHandler,
+            SUBENTRY_TYPE_VESSEL: VesselSubentryFlowHandler,
+        }
 
 
 class AreaSubentryFlowHandler(ConfigSubentryFlow):
@@ -287,6 +293,79 @@ class AreaSubentryFlowHandler(ConfigSubentryFlow):
         return self.async_show_form(
             step_id=step_id,
             data_schema=_area_schema(user_input or current),
+            errors=errors,
+        )
+
+
+def _vessel_schema(defaults: dict[str, Any]) -> vol.Schema:
+    return vol.Schema(
+        {
+            vol.Required(CONF_MMSI, default=defaults.get(CONF_MMSI, "")): str,
+            vol.Optional(
+                CONF_NAME, description={"suggested_value": defaults.get(CONF_NAME)}
+            ): str,
+        }
+    )
+
+
+class VesselSubentryFlowHandler(ConfigSubentryFlow):
+    """Track a single vessel by its MMSI, wherever it is."""
+
+    async def async_step_user(
+        self, user_input: dict[str, Any] | None = None
+    ) -> SubentryFlowResult:
+        return await self._async_step(user_input, step_id="user")
+
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> SubentryFlowResult:
+        subentry = self._get_reconfigure_subentry()
+        return await self._async_step(
+            user_input, step_id="reconfigure", current=dict(subentry.data)
+        )
+
+    async def _async_step(
+        self,
+        user_input: dict[str, Any] | None,
+        step_id: str,
+        current: dict[str, Any] | None = None,
+    ) -> SubentryFlowResult:
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            mmsi = user_input[CONF_MMSI].strip()
+            name = (user_input.get(CONF_NAME) or "").strip()
+            reconfigured_id = (
+                self._get_reconfigure_subentry().subentry_id
+                if step_id == "reconfigure"
+                else None
+            )
+            if not (mmsi.isdigit() and len(mmsi) == 9):
+                errors[CONF_MMSI] = "invalid_mmsi"
+            elif any(
+                subentry.subentry_type == SUBENTRY_TYPE_VESSEL
+                and subentry.data.get(CONF_MMSI) == mmsi
+                and subentry_id != reconfigured_id
+                for subentry_id, subentry in self._get_entry().subentries.items()
+            ):
+                errors[CONF_MMSI] = "vessel_already_tracked"
+            else:
+                data = {CONF_MMSI: mmsi}
+                if name:
+                    data[CONF_NAME] = name
+                title = name or f"MMSI {mmsi}"
+                if step_id == "reconfigure":
+                    return self.async_update_and_abort(
+                        self._get_entry(),
+                        self._get_reconfigure_subentry(),
+                        title=title,
+                        data=data,
+                    )
+                return self.async_create_entry(title=title, data=data)
+
+        return self.async_show_form(
+            step_id=step_id,
+            data_schema=_vessel_schema(user_input or current or {}),
             errors=errors,
         )
 

@@ -15,6 +15,7 @@ Watch your harbor, a strait or your favorite ferry route: every vessel that show
 ## Features
 
 - **One API key, multiple monitored areas.** Enter your aisstream.io API key once, then add as many areas (harbors, straits, ...) as you like via *Add area* - all of them share a single WebSocket connection (auto-reconnect with backoff).
+- **Track individual vessels anywhere** by their MMSI via *Track vessel* - e.g. your favorite ferry or a friend's sailing yacht - independent of your areas and wherever they are in the world.
 - **Flexible areas**: pick a **location + radius on a map**, reuse an existing Home Assistant **zone**, or enter a manual bounding box. Optionally track specific vessels by **MMSI**.
 - **One device per vessel**, created automatically the moment it's first seen inside one of your areas and **assigned to that area** (shown as connected via the area's device; a vessel keeps the area it was first seen in), with:
   - a `device_tracker` entity showing the vessel's live position on the map,
@@ -62,11 +63,19 @@ Watch your harbor, a strait or your favorite ferry route: every vessel that show
    A picked location or zone takes precedence over the manual bounding box. At least one area or an MMSI list must be set - subscribing to the entire planet without any filter would create a device for every AIS-transmitting vessel on earth (several thousand), which is rejected on purpose.
 4. Repeat *Add area* for every additional harbor/region - no need to re-enter the API key.
 
+### Tracking individual vessels
+
+To follow a specific vessel wherever it goes, click **Track vessel** on the entry's card and enter its **MMSI number** (9 digits - look it up e.g. on MarineTraffic or VesselFinder) and optionally a name. The vessel gets its device and entities right away - they stay unknown until it sends its first AIS message, and the AIS name replaces your name once it's received. Add one *Track vessel* entry per vessel.
+
+Tracked vessels are followed world-wide, no area needed. They don't create map `geo_location` events (use their `device_tracker` on a map card instead), but still count towards a "Vessels in area" sensor while inside that area. Removing the *Track vessel* entry removes the vessel's device.
+
+Because aisstream.io only allows one filter per connection (areas and MMSI numbers are combined with AND), tracked vessels use a **second WebSocket connection**, opened only if at least one vessel is tracked. aisstream.io may limit the number of simultaneous connections per account; if you see HTTP 429 warnings in the log, make sure no other client uses the same API key.
+
 Each area can be edited or removed later from the integration's entry page. Removing an area also removes the vessel devices assigned to it. Individual vessel devices can be deleted from their device page; they are re-created if the vessel is seen again after the next restart or reload. To change the API key itself, remove and re-add the integration.
 
 ### Combining areas and MMSI filters
 
-All areas share one aisstream.io subscription (one WebSocket connection, multiple bounding boxes). MMSI filters therefore apply across the whole subscription rather than being strictly scoped to the area they were added under. For the common cases (area-only tracking, or MMSI-only tracking) this makes no difference. It only matters if you mix a narrow area in one entry with an MMSI filter in another: a listed vessel could then show up as "in range" for a different area than the one its filter was added under.
+All areas share one aisstream.io subscription (one WebSocket connection, multiple bounding boxes). MMSI filters therefore apply across the whole subscription rather than being strictly scoped to the area they were added under. For the common cases (area-only tracking, or MMSI-only tracking) this makes no difference. It only matters if you mix a narrow area in one entry with an MMSI filter in another: a listed vessel could then show up as "in range" for a different area than the one its filter was added under. To follow specific vessels regardless of your areas, use *Track vessel* instead (see above), which has a subscription of its own.
 
 ## Showing vessels on a map
 

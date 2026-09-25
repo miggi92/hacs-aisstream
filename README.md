@@ -63,15 +63,19 @@ Watch your harbor, a strait or your favorite ferry route: every vessel that show
    A picked location or zone takes precedence over the manual bounding box. At least one area or an MMSI list must be set - subscribing to the entire planet without any filter would create a device for every AIS-transmitting vessel on earth (several thousand), which is rejected on purpose.
 4. Repeat *Add area* for every additional harbor/region - no need to re-enter the API key.
 
+Each area can be edited or removed later from the integration's entry page. Removing an area also removes the vessel devices assigned to it. Individual vessel devices can be deleted from their device page; they are re-created as soon as the vessel is seen again. To change the API key itself, remove and re-add the integration.
+
 ### Tracking individual vessels
 
 To follow a specific vessel wherever it goes, click **Track vessel** on the entry's card and enter its **MMSI number** (9 digits - look it up e.g. on MarineTraffic or VesselFinder) and optionally a name. The vessel gets its device and entities right away - they stay unknown until it sends its first AIS message, and the AIS name replaces your name once it's received. Add one *Track vessel* entry per vessel.
 
-Tracked vessels are followed world-wide, no area needed. They don't create map `geo_location` events (use their `device_tracker` on a map card instead), but still count towards a "Vessels in area" sensor while inside that area. Removing the *Track vessel* entry removes the vessel's device.
+Tracked vessels are followed world-wide, no area needed. They don't create map `geo_location` events (use their `device_tracker` on a map card instead), but still count towards a "Vessels in area" sensor while inside that area. They are never removed automatically, even if they don't report for a long time - removing the *Track vessel* entry removes the vessel's device.
 
 Because aisstream.io only allows one filter per connection (areas and MMSI numbers are combined with AND), tracked vessels use a **second WebSocket connection**, opened only if at least one vessel is tracked. aisstream.io may limit the number of simultaneous connections per account; if you see HTTP 429 warnings in the log, make sure no other client uses the same API key.
 
-Each area can be edited or removed later from the integration's entry page. Removing an area also removes the vessel devices assigned to it. Individual vessel devices can be deleted from their device page; they are re-created if the vessel is seen again after the next restart or reload. To change the API key itself, remove and re-add the integration.
+### Removing vessels that left
+
+Vessel devices (with their `device_tracker` and sensors) are removed automatically once a vessel hasn't reported a position for **60 minutes**; after a restart, vessels that aren't seen again are removed 60 minutes later. To clean up right away, press the **Remove stale vessels** button on the area's device: it removes every vessel of that area without a position report in the last 20 minutes, including all vessels not seen since the last restart. Vessels on an area's MMSI list and vessels added via *Track vessel* are never removed. A removed vessel is re-created as soon as it is seen again.
 
 ### Combining areas and MMSI filters
 

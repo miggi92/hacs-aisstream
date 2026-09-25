@@ -1,6 +1,7 @@
 """The aisstream.io integration."""
 from __future__ import annotations
 
+from datetime import timedelta
 import logging
 
 from homeassistant.config_entries import ConfigEntry
@@ -8,13 +9,17 @@ from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers.event import async_track_time_interval
 
+from .cleanup import async_remove_stale_vessels, device_subentry_ids, vessel_mmsi
 from .const import (
     CONF_API_KEY,
     CONF_MMSI,
     CONF_MMSI_FILTER,
     CONF_NAME,
     DOMAIN,
+    STALE_VESSEL_MINUTES,
+    STALE_VESSEL_SWEEP_MINUTES,
     SUBENTRY_TYPE_AREA,
     SUBENTRY_TYPE_VESSEL,
 )
@@ -24,6 +29,7 @@ from .geo import resolve_area_box
 _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS: list[Platform] = [
+    Platform.BUTTON,
     Platform.DEVICE_TRACKER,
     Platform.GEO_LOCATION,
     Platform.SENSOR,
@@ -75,11 +81,7 @@ def _remove_orphaned_devices(hass: HomeAssistant, entry: ConfigEntry) -> None:
     for device in dr.async_entries_for_config_entry(
         device_registry, entry.entry_id
     ):
-        if hasattr(device, "config_subentry_id"):
-            # HA 2026.8+: a device belongs to exactly one entry and subentry.
-            subentry_ids = {device.config_subentry_id}
-        else:
-            subentry_ids = device.config_entries_subentries.get(entry.entry_id, set())
+        subentry_ids = device_subentry_ids(device, entry.entry_id)
         if any(subentry_id in entry.subentries for subentry_id in subentry_ids):
             continue
         device_registry.async_remove_device(device.id)
@@ -103,6 +105,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
+
+    @callback
+    def _sweep(_now=None) -> None:
+        async_remove_stale_vessels(
+            hass,
+            entry,
+            client,
+            timedelta(minutes=STALE_VESSEL_MINUTES),
+            unseen_since=client.started_at,
+        )
+
+    entry.async_on_unload(
+        async_track_time_interval(
+            hass, _sweep, timedelta(minutes=STALE_VESSEL_SWEEP_MINUTES)
+        )
+    )
     return True
 
 
@@ -119,11 +137,17 @@ async def async_remove_config_entry_device(
     Area devices and individually tracked vessels go with their subentry.
     """
     tracked_mmsi = _collect_vessels(entry)
-    return not any(
+    if any(
         identifier in entry.subentries or identifier in tracked_mmsi
         for domain, identifier in device.identifiers
         if domain == DOMAIN
-    )
+    ):
+        return False
+    # Forget the vessel so it is re-created as soon as it is seen again.
+    client: AISStreamClient | None = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    if client is not None and (mmsi := vessel_mmsi(device, entry)) is not None:
+        client.forget_ship(mmsi)
+    return True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

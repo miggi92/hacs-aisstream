@@ -10,7 +10,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN, SIGNAL_NEW_SHIP, ship_category
+from .const import DOMAIN, SIGNAL_NEW_SHIP, SIGNAL_SHIP_REMOVED, ship_category
 from .coordinator import AISStreamClient
 from .entity import AISStreamShipEntity
 from .marker import ship_icon, ship_picture
@@ -38,6 +38,13 @@ async def async_setup_entry(
     entry.async_on_unload(
         async_dispatcher_connect(
             hass, f"{SIGNAL_NEW_SHIP}_{entry.entry_id}", _add_ship
+        )
+    )
+    # Removed vessels (their devices are deleted) get new entities when seen
+    # again.
+    entry.async_on_unload(
+        async_dispatcher_connect(
+            hass, f"{SIGNAL_SHIP_REMOVED}_{entry.entry_id}", known_mmsi.discard
         )
     )
 

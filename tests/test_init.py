@@ -1,10 +1,16 @@
 """Tests for vessel entities, area assignment and cleanup."""
 from __future__ import annotations
 
+from datetime import timedelta
+
 from homeassistant.config_entries import ConfigSubentryData
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr, entity_registry as er
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from homeassistant.util import dt as dt_util
+from pytest_homeassistant_custom_component.common import (
+    MockConfigEntry,
+    async_fire_time_changed,
+)
 
 from custom_components.aisstream.const import DOMAIN, SUBENTRY_TYPE_AREA
 
@@ -12,14 +18,14 @@ SANTANDER = {"location": {"latitude": 43.46, "longitude": -3.79, "radius": 5000}
 MMSI_IN = "224612000"
 
 
-def _entry(hass: HomeAssistant) -> MockConfigEntry:
+def _entry(hass: HomeAssistant, area_data: dict = SANTANDER) -> MockConfigEntry:
     entry = MockConfigEntry(
         domain=DOMAIN,
         title="AISstream.io",
         data={"api_key": "test"},
         subentries_data=[
             ConfigSubentryData(
-                data=SANTANDER,
+                data=area_data,
                 subentry_id="santander",
                 subentry_type=SUBENTRY_TYPE_AREA,
                 title="Santander",
@@ -253,3 +259,100 @@ async def test_class_b_vessels_are_tracked(hass: HomeAssistant) -> None:
     assert tracker.attributes["icon"] == "mdi:sail-boat"
     # Not moving / no course: a dot instead of an arrow.
     assert "circle" in tracker.attributes["entity_picture"]
+
+
+def _vessel_mmsis(hass: HomeAssistant, entry: MockConfigEntry) -> set[str]:
+    return {
+        identifier
+        for device in dr.async_entries_for_config_entry(
+            dr.async_get(hass), entry.entry_id
+        )
+        for domain, identifier in device.identifiers
+        if domain == DOMAIN and identifier != "santander"
+    }
+
+
+async def test_remove_stale_vessels_button(hass: HomeAssistant) -> None:
+    """The area button removes vessels that stopped reporting."""
+    entry = _entry(hass)
+    stale_mmsi = "224000001"
+    unseen_mmsi = "224000002"
+    dev_reg = dr.async_get(hass)
+    # A vessel device left over from before a restart.
+    dev_reg.async_get_or_create(
+        config_entry_id=entry.entry_id,
+        config_subentry_id="santander",
+        identifiers={(DOMAIN, unseen_mmsi)},
+    )
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    client = hass.data[DOMAIN][entry.entry_id]
+    client.available = True
+
+    _position(client, MMSI_IN, 43.46, -3.79)
+    _position(client, stale_mmsi, 43.46, -3.79, name="OLD SHIP")
+    await hass.async_block_till_done()
+    client.ships[stale_mmsi].last_position_update -= timedelta(minutes=30)
+    assert _vessel_mmsis(hass, entry) == {MMSI_IN, stale_mmsi, unseen_mmsi}
+
+    button = er.async_get(hass).async_get_entity_id(
+        "button", DOMAIN, "santander_remove_stale_vessels"
+    )
+    assert button is not None
+    await hass.services.async_call(
+        "button", "press", {"entity_id": button}, blocking=True
+    )
+    await hass.async_block_till_done()
+
+    assert _vessel_mmsis(hass, entry) == {MMSI_IN}
+    assert hass.states.get("device_tracker.aisstream_old_ship_position") is None
+    assert stale_mmsi not in client.ships
+
+    # Seen again, the removed vessel gets its entities back right away.
+    _position(client, stale_mmsi, 43.46, -3.79, name="OLD SHIP")
+    await hass.async_block_till_done()
+    assert stale_mmsi in _vessel_mmsis(hass, entry)
+    assert hass.states.get("device_tracker.aisstream_old_ship_position") is not None
+
+
+async def test_stale_vessels_expire_automatically(hass: HomeAssistant) -> None:
+    """Vessels are removed after an hour without a position report."""
+    entry = _entry(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    client = hass.data[DOMAIN][entry.entry_id]
+
+    _position(client, MMSI_IN, 43.46, -3.79)
+    await hass.async_block_till_done()
+
+    # Recently seen: kept.
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(minutes=5))
+    await hass.async_block_till_done()
+    assert _vessel_mmsis(hass, entry) == {MMSI_IN}
+
+    client.ships[MMSI_IN].last_position_update -= timedelta(minutes=61)
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(minutes=10))
+    await hass.async_block_till_done()
+    assert _vessel_mmsis(hass, entry) == set()
+
+
+async def test_listed_vessels_are_kept(hass: HomeAssistant) -> None:
+    """Vessels on an area's MMSI list are never removed as stale."""
+    entry = _entry(hass, {**SANTANDER, "mmsi_filter": [MMSI_IN]})
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    client = hass.data[DOMAIN][entry.entry_id]
+
+    _position(client, MMSI_IN, 43.46, -3.79)
+    await hass.async_block_till_done()
+    client.ships[MMSI_IN].last_position_update -= timedelta(days=1)
+
+    button = er.async_get(hass).async_get_entity_id(
+        "button", DOMAIN, "santander_remove_stale_vessels"
+    )
+    await hass.services.async_call(
+        "button", "press", {"entity_id": button}, blocking=True
+    )
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(minutes=10))
+    await hass.async_block_till_done()
+    assert _vessel_mmsis(hass, entry) == {MMSI_IN}

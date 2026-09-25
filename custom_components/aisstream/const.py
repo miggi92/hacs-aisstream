@@ -27,11 +27,18 @@ STABLE_CONNECTION_SECONDS = 60
 
 SIGNAL_NEW_SHIP = f"{DOMAIN}_new_ship"
 SIGNAL_SHIP_UPDATE = f"{DOMAIN}_ship_update"
+SIGNAL_SHIP_REMOVED = f"{DOMAIN}_ship_removed"
 
 # How long a vessel is still considered "present" after its last position
 # report, and how often the area count sensor re-evaluates presence.
 PRESENCE_TIMEOUT_MINUTES = 20
 PRESENCE_RECHECK_MINUTES = 2
+
+# Vessel devices without a position report for this long are removed
+# automatically (vessels on an area's MMSI list are kept), checked every
+# STALE_VESSEL_SWEEP_MINUTES.
+STALE_VESSEL_MINUTES = 60
+STALE_VESSEL_SWEEP_MINUTES = 5
 
 # AIS navigational status codes (ITU-R M.1371)
 NAVIGATIONAL_STATUS = {

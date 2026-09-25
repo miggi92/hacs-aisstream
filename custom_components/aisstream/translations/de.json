@@ -60,6 +60,9 @@
     }
   },
   "entity": {
+    "button": {
+      "remove_stale_vessels": { "name": "Veraltete Schiffe entfernen" }
+    },
     "device_tracker": {
       "position": { "name": "Position" }
     },

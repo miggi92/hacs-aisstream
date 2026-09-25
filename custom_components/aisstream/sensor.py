@@ -28,11 +28,12 @@ from .const import (
     PRESENCE_TIMEOUT_MINUTES,
     SHIP_CATEGORIES,
     SIGNAL_NEW_SHIP,
+    SIGNAL_SHIP_REMOVED,
     SUBENTRY_TYPE_AREA,
     ship_category,
 )
 from .coordinator import AISStreamClient, ShipData
-from .entity import AISStreamShipEntity
+from .entity import AISStreamShipEntity, area_device_info
 from .geo import point_in_box, resolve_area_box
 
 _LOGGER = logging.getLogger(__name__)
@@ -147,6 +148,13 @@ async def async_setup_entry(
             hass, f"{SIGNAL_NEW_SHIP}_{entry.entry_id}", _add_ship
         )
     )
+    # Removed vessels (their devices are deleted) get new entities when seen
+    # again.
+    entry.async_on_unload(
+        async_dispatcher_connect(
+            hass, f"{SIGNAL_SHIP_REMOVED}_{entry.entry_id}", known_mmsi.discard
+        )
+    )
 
     for mmsi in list(client.ships):
         _add_ship(mmsi)
@@ -198,12 +206,7 @@ class AISStreamAreaCountSensor(SensorEntity):
 
     @property
     def device_info(self) -> DeviceInfo:
-        return DeviceInfo(
-            identifiers={(DOMAIN, self._subentry_id)},
-            name=self._subentry.title,
-            manufacturer="aisstream.io",
-            model="AIS area monitor",
-        )
+        return area_device_info(self._subentry_id, self._subentry)
 
     @property
     def available(self) -> bool:

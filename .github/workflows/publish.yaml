@@ -1,0 +1,99 @@
+name: Publish
+
+on:
+  release:
+    types:
+      - published
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag, für den der Workflow nachträglich laufen soll (z.B. v0.0.6)"
+        required: true
+
+jobs:
+  release_zip_file:
+    name: Run automations to build latest release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: 🏷️ Tag ermitteln
+        id: tag
+        run: echo "value=${{ github.event.release.tag_name || github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
+
+      - name: 🛍️ Checkout the repo
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: ${{ steps.tag.outputs.value }}
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.x"
+
+      - name: 🧶 Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: 🟢 Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: 📦 Dependencies installieren
+        run: pnpm install --frozen-lockfile
+
+      - name: 📝 Update manifest version
+        run: |
+          VERSION="${{ steps.tag.outputs.value }}"
+          VERSION="${VERSION#v}"  # Remove 'v' prefix if it exists
+          sed -i 's/"version": "[^"]*"/"version": "'"$VERSION"'"/' '${{ github.workspace }}/custom_components/aisstream/manifest.json'
+
+      - name: 🤐 Copy and Zip
+        run: |
+          cd '${{ github.workspace }}/custom_components/aisstream'
+          zip aisstream.zip -r ./
+
+      - name: ☁️ Upload zip to release
+        uses: softprops/action-gh-release@v3.0.3
+        with:
+          tag_name: ${{ steps.tag.outputs.value }}
+          files: "${{ github.workspace }}/custom_components/aisstream/aisstream.zip"
+
+      - name: 📜 Changelog generieren
+        run: |
+          TAG="${{ steps.tag.outputs.value }}"
+          VERSION="${TAG#v}"
+          PREV_TAG="$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || true)"
+
+          ARGS=(--to "$TAG" -r "$VERSION" --output CHANGELOG.md)
+          if [ -n "$PREV_TAG" ]; then
+            ARGS=(--from "$PREV_TAG" "${ARGS[@]}")
+          fi
+
+          pnpm exec changelogen "${ARGS[@]}"
+
+      - name: 💾 Changelog committen
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md
+          if ! git diff --cached --quiet; then
+            git commit -m "docs: Changelog für ${{ steps.tag.outputs.value }} aktualisiert"
+            git push origin HEAD:main
+          fi
+
+      - name: 📋 Release-Beschreibung aus Changelog übernehmen
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${{ steps.tag.outputs.value }}"
+          VERSION="${VERSION#v}"
+          HEADING="## v$VERSION"
+          awk -v heading="$HEADING" '
+            $0 == heading { printing=1; next }
+            /^## / { if (printing) exit }
+            printing { print }
+          ' CHANGELOG.md | sed -e '/./,$!d' > release_notes.md
+          gh release edit "${{ steps.tag.outputs.value }}" --notes-file release_notes.md

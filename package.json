@@ -1,0 +1,25 @@
+{
+  "name": "hacs-aisstream",
+  "private": true,
+  "packageManager": "pnpm@12.6.0",
+  "scripts": {
+    "changelog": "changelogen"
+  },
+  "devDependencies": {
+    "changelogen": "^0.6.2"
+  },
+  "changelog": {
+    "types": {
+      "feat": { "title": "✨ Features", "semver": "minor" },
+      "fix": { "title": "🐛 Bugfixes", "semver": "patch" },
+      "docs": { "title": "📚 Dokumentation" },
+      "refactor": { "title": "🚜 Refactoring", "semver": "patch" },
+      "perf": { "title": "⚡ Performance", "semver": "patch" },
+      "test": { "title": "🧪 Tests" },
+      "ci": { "title": "⚙️ CI" },
+      "chore": { "title": "🔧 Sonstiges" },
+      "revert": { "title": "◀️ Revert" }
+    },
+    "noAuthors": true
+  }
+}

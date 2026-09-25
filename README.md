@@ -1,56 +1,72 @@
-# hacs-aisstream
+# AISstream.io for Home Assistant
 
-Home Assistant custom integration for [aisstream.io](https://aisstream.io) - live AIS ship-tracking data over a WebSocket feed.
+[![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5?style=for-the-badge&logo=homeassistantcommunitystore&logoColor=white)](https://github.com/hacs/integration)
+[![GitHub Release](https://img.shields.io/github/v/release/miggi92/hacs-aisstream?style=for-the-badge)](https://github.com/miggi92/hacs-aisstream/releases)
+![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/miggi92/hacs-aisstream/total?style=for-the-badge)
+[![GitHub License](https://img.shields.io/github/license/miggi92/hacs-aisstream?style=for-the-badge)](LICENSE)
+![GitHub Repo stars](https://img.shields.io/github/stars/miggi92/hacs-aisstream?style=for-the-badge)
+
+> Live AIS ship tracking in Home Assistant, powered by the free WebSocket feed of [aisstream.io](https://aisstream.io).
+
+<img src="https://raw.githubusercontent.com/miggi92/hacs-aisstream/main/custom_components/aisstream/brand/icon.png" alt="AISstream.io logo" width="128">
+
+Watch your harbor, a strait or your favorite ferry route: every vessel that shows up in one of your areas becomes a Home Assistant device with its live position, speed, course, destination and more - and appears on your map cards as an arrow pointing in its heading.
 
 ## Features
 
-- Connects to `wss://stream.aisstream.io/v0/stream` and keeps the connection alive (auto-reconnect with backoff).
-- **One API key, multiple monitored areas.** Enter your aisstream.io API key once when adding the integration, then add as many areas (harbors, straits, ...) as you like afterward via *Add area* - all of them share a single WebSocket connection.
-- Each area can be set up three ways:
-  - pick a **location + radius directly on a map** (no extra setup needed),
-  - reuse an existing Home Assistant **zone**,
-  - or enter a manual bounding box (south/west/north/east).
-  - Optionally add a comma-separated list of **MMSI numbers** to track specific vessels within (or regardless of) that area.
-- One Home Assistant **device per vessel**, created automatically the moment it's first seen inside one of your areas and **assigned to that area** (shown as connected via the area's device; a vessel keeps the area it was first seen in), with:
+- **One API key, multiple monitored areas.** Enter your aisstream.io API key once, then add as many areas (harbors, straits, ...) as you like via *Add area* - all of them share a single WebSocket connection (auto-reconnect with backoff).
+- **Flexible areas**: pick a **location + radius on a map**, reuse an existing Home Assistant **zone**, or enter a manual bounding box. Optionally track specific vessels by **MMSI**.
+- **One device per vessel**, created automatically the moment it's first seen inside one of your areas and **assigned to that area** (shown as connected via the area's device; a vessel keeps the area it was first seen in), with:
   - a `device_tracker` entity showing the vessel's live position on the map,
   - `sensor` entities for speed over ground, course over ground, true heading, navigational status, destination, ETA, ship type (cargo, tanker, passenger, fishing, ...) and draught,
   - further static data (IMO number, call sign, length/width) as attributes of the `device_tracker`.
-- Both class A (commercial shipping) and class B (yachts, small fishing boats, ...) AIS transponders are supported.
-- A short-lived **`geo_location` event per vessel currently inside one of your areas** (source `aisstream`, distance in km from the area's center). Events disappear automatically once a vessel leaves its area or hasn't reported a position for 20 minutes, so they are ideal for showing "ships around here right now" on a map (see below).
-- A **"Vessels in area" sensor** per area, showing how many vessels have reported a position inside that specific area within the last 20 minutes - handy for harbor-traffic dashboards and automations. Its attributes also expose live connection diagnostics (`connected`, `messages_received`, `last_message_at`, the resolved `bounding_box`) to help tell a real connection problem apart from a quiet/uncovered area.
+- **Map-ready `geo_location` events** for every vessel currently inside one of your areas (source `aisstream`, distance in km from the area's center). They disappear automatically once a vessel leaves its area or hasn't reported a position for 20 minutes.
+- **"Vessels in area" sensor** per area, counting the vessels that reported a position there within the last 20 minutes - handy for harbor-traffic dashboards and automations. Its attributes also expose live connection diagnostics (`connected`, `messages_received`, `last_message_at`, the resolved `bounding_box`).
+- Class A (commercial shipping) and class B (yachts, small fishing boats, ...) AIS transponders are supported.
+- Push-based (`cloud_push`): entities update as soon as a new AIS message arrives, no polling.
+- UI in English and German.
+
+## Requirements
+
+- Home Assistant **2025.4** or newer (uses config subentries to manage multiple areas under one API key).
+- A free [aisstream.io](https://aisstream.io) account and API key.
 
 ## Installation
 
-### Via HACS (custom repository)
+### HACS (recommended)
 
-1. HACS -> Integrations -> the 3-dot menu -> *Custom repositories*.
-2. Add this repository URL, category *Integration*.
-3. Install "AISstream.io" and restart Home Assistant.
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=miggi92&repository=hacs-aisstream&category=Integration)
+
+1. Click the button above, or in HACS open the 3-dot menu -> *Custom repositories* and add `https://github.com/miggi92/hacs-aisstream` with category *Integration*.
+2. Search for "AISstream.io" in HACS and download it.
+3. Restart Home Assistant.
 
 ### Manual
 
-Copy `custom_components/aisstream` into your Home Assistant `config/custom_components/` folder and restart.
-
-Requires Home Assistant 2025.4 or newer (uses the config subentries feature to manage multiple areas under one API key).
+1. Download `aisstream.zip` from the [latest release](https://github.com/miggi92/hacs-aisstream/releases/latest).
+2. Extract it into `config/custom_components/aisstream/` of your Home Assistant installation.
+3. Restart Home Assistant.
 
 ## Configuration
+
+[![Open your Home Assistant instance and start setting up a new integration.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=aisstream)
 
 1. Create a free account at [aisstream.io](https://aisstream.io) and generate an API key.
 2. In Home Assistant: *Settings -> Devices & Services -> Add Integration -> AISstream.io*, and enter your API key. This creates the "AISstream.io" hub entry - it won't track anything yet.
 3. On the new entry's card, click **Add area** and set at least one of:
-   - **Area**: click on the map and drop a pin on the harbor/area you want to monitor, then drag to set the radius - this is the easiest way to watch a specific port,
-   - **Area (zone)**: pick an existing Home Assistant zone instead, if you already have one for the location,
+   - **Area**: click on the map and drop a pin on the harbor/area you want to monitor, then drag to set the radius - the easiest way to watch a specific port,
+   - **Area (zone)**: pick an existing Home Assistant zone instead,
    - **Manual bounding box** (south/west/north/east), for advanced/non-circular areas,
    - and/or a comma-separated list of **MMSI numbers** of specific vessels to track.
 
-   If a picked location or a zone is set, it takes precedence over the manual bounding box. At least one area or an MMSI list must be set - subscribing to the entire planet without any filter would create a device for every AIS-transmitting vessel on earth (several thousand), which is rejected on purpose.
-4. Repeat *Add area* for every additional harbor/region you want to monitor - no need to re-enter the API key.
+   A picked location or zone takes precedence over the manual bounding box. At least one area or an MMSI list must be set - subscribing to the entire planet without any filter would create a device for every AIS-transmitting vessel on earth (several thousand), which is rejected on purpose.
+4. Repeat *Add area* for every additional harbor/region - no need to re-enter the API key.
 
 Each area can be edited or removed later from the integration's entry page. Removing an area also removes the vessel devices assigned to it. Individual vessel devices can be deleted from their device page; they are re-created if the vessel is seen again after the next restart or reload. To change the API key itself, remove and re-add the integration.
 
-### A note on combining areas and MMSI filters
+### Combining areas and MMSI filters
 
-All areas you add share one aisstream.io subscription (one WebSocket connection, multiple bounding boxes). If you set MMSI filters on some areas, they currently apply across the whole subscription rather than being strictly scoped to that one area - for the common cases (either area-only tracking, or MMSI-only tracking with a single account) this makes no difference. It only matters if you mix a narrow area in one entry with an MMSI filter in another: a listed vessel could then show up as "in range" for a different area's box than the one its filter was added under.
+All areas share one aisstream.io subscription (one WebSocket connection, multiple bounding boxes). MMSI filters therefore apply across the whole subscription rather than being strictly scoped to the area they were added under. For the common cases (area-only tracking, or MMSI-only tracking) this makes no difference. It only matters if you mix a narrow area in one entry with an MMSI filter in another: a listed vessel could then show up as "in range" for a different area than the one its filter was added under.
 
 ## Showing vessels on a map
 
@@ -101,8 +117,20 @@ The per-area "Vessels in area" sensors don't carry the prefix and stay recorded.
 ## Notes
 
 - Brand images (icon and logo, including dark variants) ship in `custom_components/aisstream/brand/` and are picked up automatically by Home Assistant 2026.3 or newer.
-- Data is push-based (`iot_class: cloud_push`); entities update as soon as a new AIS message for that vessel arrives, there is no polling interval to configure.
 - AIS "not available" values (`TrueHeading` 511, `Cog` 360, `Sog` 102.3) are reported as unknown.
+
+## Troubleshooting
+
+- **No vessels show up**: check the attributes of the area's "Vessels in area" sensor. `connected: false` points to a connection/API key problem; `connected: true` with `messages_received` staying at 0 usually means there is simply no AIS coverage (aisstream.io relies on volunteer receivers) or no traffic in that area right now.
+- For more details, enable debug logging:
+
+  ```yaml
+  logger:
+    logs:
+      custom_components.aisstream: debug
+  ```
+
+Found a bug or have an idea? [Open an issue](https://github.com/miggi92/hacs-aisstream/issues).
 
 ## Development
 
@@ -112,3 +140,13 @@ Tests run against a real Home Assistant core via `pytest-homeassistant-custom-co
 pip install -r requirements_test.txt
 pytest
 ```
+
+Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/) (`feat: ...`, `fix: ...`, ...) - the [changelog](CHANGELOG.md) and release notes are generated from them.
+
+### Releases
+
+Releases are fully automated: closing a GitHub milestone named like a version (e.g. `0.7.0`) creates the tag and GitHub release, which then sets the version in `manifest.json`, attaches `aisstream.zip` for HACS, updates `CHANGELOG.md` and fills in the release notes. Don't bump the version or edit the changelog by hand.
+
+## License
+
+[MIT](LICENSE)
